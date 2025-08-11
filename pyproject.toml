@@ -7,10 +7,10 @@ authors = [
     { name = "cid-chan", email ="cid+git@cid-chan.moe" }
 ]
 dynamic = ["description"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
-    "vapoursynth>=57"
+    "vapoursynth>=72"
 ]
 
 [project.optional-dependencies]
