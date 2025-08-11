@@ -1,6 +1,6 @@
 [project]
 name = "vsengine"
-version = "0.2.0+dirty"
+version = "0.2.0+jet"
 license = { file = "COPYING" }
 readme = "README.md"
 authors = [
@@ -12,12 +12,6 @@ requires-python = ">=3.9"
 dependencies = [
     "vapoursynth>=57"
 ]
-
-[project.scripts]
-vpy-unittest = "vsengine.tests.unittest:main"
-
-[project.entry-points.pytest11]
-vsengine = "vsengine.tests.pytest"
 
 [project.optional-dependencies]
 trio = [

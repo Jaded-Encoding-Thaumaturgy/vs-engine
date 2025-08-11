@@ -7,13 +7,13 @@ import unittest
 
 from vsengine._testutils import forcefully_unregister_policy, use_standalone_policy
 
-from vapoursynth import core, PresetFormat, VideoFormat, GRAY8, RGB24
+from vapoursynth import core, PresetVideoFormat, VideoFormat, GRAY8, RGB24
 from vapoursynth import VideoNode, VideoFrame
 
 from vsengine.video import frame, planes, frames, render
 
 
-AnyFormat = t.Union[PresetFormat, VideoFormat]
+AnyFormat = t.Union[PresetVideoFormat, VideoFormat]
 
 
 class TestVideo(unittest.TestCase):
