@@ -19,7 +19,7 @@ DIR = os.path.dirname(__file__)
 # mediainfo -Output=JOSN -Full [Filenames]
 # | jq '.[].media.track[] | select(."@type" == "Video") | {matrix: .matrix_coefficients, width: .Width, height: .Height, primaries: .colour_primaries, transfer: .transfer_characteristics, chromaloc: .ChromaSubsampling_Position} | select(.matrix)' | jq -s
 PATH = os.path.join(DIR, "fixtures", "heuristic_examples.json")
-with open(PATH, "r") as h:
+with open(PATH) as h:
     HEURISTIC_EXAMPLES = json.load(h)
 
 MATRIX_MAPPING = {

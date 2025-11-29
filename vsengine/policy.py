@@ -14,9 +14,9 @@ the best store-implementation for you):
     >>> policy = Policy(GlobalStore())
     >>> policy.register()
     >>> with policy.new_environment() as env:
-    ...    with env.use():
-    ...        vs.core.std.BlankClip().set_output()
-    ...    print(env.outputs)
+    ...     with env.use():
+    ...         vs.core.std.BlankClip().set_output()
+    ...     print(env.outputs)
     {"0": <vapoursynth.VideoNode ...>}
     >>> policy.unregister()
 
@@ -37,7 +37,7 @@ tailored for different uses and concurrency needs:
   that can run multiple environments at once. This one behaves like vsscript.
 
 - ContextVarStore is useful when you are using event-loops like asyncio,
-  curio, and trio. When using this store, make sure to reuse the store 
+  curio, and trio. When using this store, make sure to reuse the store
   between successive Policy-instances as otherwise the old store might
   leak objects. More details are written in the documentation of the
   contextvars module of the standard library.
@@ -58,42 +58,41 @@ ManagedEnvironment is also a context-manager which does it for you.
 
 When reloading the application, you can call policy.unregister()
 """
-import typing as t
 
-import logging
-import weakref
-import threading
+from __future__ import annotations
+
 import contextlib
 import contextvars
+import logging
+import threading
+import weakref
+from collections.abc import Iterator, Mapping
+from types import TracebackType
+from typing import Any, Protocol, Self
+
+import vapoursynth as vs
+from vapoursynth import Environment, EnvironmentData, EnvironmentPolicy, EnvironmentPolicyAPI, register_policy
 
 from vsengine._hospice import admit_environment
 
-from vapoursynth import EnvironmentPolicy, EnvironmentPolicyAPI
-from vapoursynth import Environment, EnvironmentData
-from vapoursynth import register_policy
-import vapoursynth as vs
-
-
-__all__ = [
-    "GlobalStore", "ThreadLocalStore", "ContextVarStore",
-    "Policy", "ManagedEnvironment"
-]
+__all__ = ["ContextVarStore", "GlobalStore", "ManagedEnvironment", "Policy", "ThreadLocalStore"]
 
 
 logger = logging.getLogger(__name__)
 
 
-class EnvironmentStore(t.Protocol):
+class EnvironmentStore(Protocol):
     """
     Environment Stores manage which environment is currently active.
     """
-    def set_current_environment(self, environment: t.Any):
+
+    def set_current_environment(self, environment: Any) -> None:
         """
         Set the current environment in the store.
         """
         ...
 
-    def get_current_environment(self) -> t.Any:
+    def get_current_environment(self) -> Any:
         """
         Retrieve the current environment from the store (if any)
         """
@@ -104,16 +103,17 @@ class GlobalStore(EnvironmentStore):
     """
     This is the simplest store: It just stores the environment in a variable.
     """
-    _current: t.Optional[EnvironmentData]
+
+    _current: EnvironmentData | None
     __slots__ = ("_current",)
 
     def __init__(self) -> None:
         self._current = None
-    
-    def set_current_environment(self, environment: t.Optional[EnvironmentData]):
+
+    def set_current_environment(self, environment: EnvironmentData | None) -> None:
         self._current = environment
 
-    def get_current_environment(self) -> t.Optional[EnvironmentData]:
+    def get_current_environment(self) -> EnvironmentData | None:
         return self._current
 
 
@@ -129,10 +129,10 @@ class ThreadLocalStore(EnvironmentStore):
     def __init__(self) -> None:
         self._current = threading.local()
 
-    def set_current_environment(self, environment: t.Optional[EnvironmentData]):
+    def set_current_environment(self, environment: EnvironmentData | None) -> None:
         self._current.environment = environment
 
-    def get_current_environment(self) -> t.Optional[EnvironmentData]:
+    def get_current_environment(self) -> EnvironmentData | None:
         return getattr(self._current, "environment", None)
 
 
@@ -140,15 +140,16 @@ class ContextVarStore(EnvironmentStore):
     """
     If you are using AsyncIO or similar frameworks, use this store.
     """
-    _current: contextvars.ContextVar[t.Optional[EnvironmentData]]
 
-    def __init__(self, name: str="vapoursynth") -> None:
+    _current: contextvars.ContextVar[EnvironmentData | None]
+
+    def __init__(self, name: str = "vapoursynth") -> None:
         self._current = contextvars.ContextVar(name)
 
-    def set_current_environment(self, environment: t.Optional[EnvironmentData]):
+    def set_current_environment(self, environment: EnvironmentData | None) -> None:
         self._current.set(environment)
 
-    def get_current_environment(self) -> t.Optional[EnvironmentData]:
+    def get_current_environment(self) -> EnvironmentData | None:
         return self._current.get(None)
 
 
@@ -157,12 +158,12 @@ class _ManagedPolicy(EnvironmentPolicy):
     This class directly interfaces with VapourSynth.
     """
 
-    _api: t.Optional[EnvironmentPolicyAPI]
+    _api: EnvironmentPolicyAPI | None
     _store: EnvironmentStore
     _mutex: threading.Lock
     _local: threading.local
 
-    __slots__ = ("_api", "_store", "_mutex", "_local")
+    __slots__ = ("_api", "_local", "_mutex", "_store")
 
     def __init__(self, store: EnvironmentStore) -> None:
         self._store = store
@@ -174,15 +175,15 @@ class _ManagedPolicy(EnvironmentPolicy):
     # should not make their switch observable from the outside.
 
     # Start the section.
-    def inline_section_start(self, environment: EnvironmentData):
+    def inline_section_start(self, environment: EnvironmentData) -> None:
         self._local.environment = environment
 
     # End the section.
-    def inline_section_end(self):
+    def inline_section_end(self) -> None:
         self._local.environment = None
 
     @property
-    def api(self):
+    def api(self) -> EnvironmentPolicyAPI:
         if self._api is None:
             raise RuntimeError("Invalid state: No access to the current API")
         return self._api
@@ -195,20 +196,19 @@ class _ManagedPolicy(EnvironmentPolicy):
         self._api = None
         logger.debug("Policy cleared.")
 
-    def get_current_environment(self) -> t.Optional[EnvironmentData]:
+    def get_current_environment(self) -> EnvironmentData | None:
         # For small segments, allow switching the environment inline.
         # This is useful for vsengine-functions that require access to the
         # vapoursynth api, but don't want to invoke the store for it.
-        if (env := getattr(self._local, "environment", None)) is not None:
-            if self.is_alive(env):
-                return env
+        if (env := getattr(self._local, "environment", None)) is not None and self.is_alive(env):
+            return env
 
         # We wrap everything in a mutex to make sure
         # no context-switch can reliably happen in this section.
         with self._mutex:
             current_environment = self._store.get_current_environment()
             if current_environment is None:
-                return
+                return None
 
             if current_environment() is None:
                 logger.warning(f"Got dead environment: {current_environment()!r}")
@@ -223,9 +223,9 @@ class _ManagedPolicy(EnvironmentPolicy):
                 self._store.set_current_environment(None)
                 return None
 
-            return t.cast(EnvironmentData, received_environment)
+            return received_environment
 
-    def set_environment(self, environment: EnvironmentData) -> t.Optional[EnvironmentData]:
+    def set_environment(self, environment: EnvironmentData | None) -> EnvironmentData | None:
         with self._mutex:
             previous_environment = self._store.get_current_environment()
 
@@ -242,20 +242,22 @@ class _ManagedPolicy(EnvironmentPolicy):
             if previous_environment is not None:
                 return previous_environment()
 
+        return None
 
-class ManagedEnvironment:
+
+class ManagedEnvironment(contextlib.AbstractContextManager["ManagedEnvironment"]):
     _environment: Environment
-    _data: EnvironmentData
-    _policy: 'Policy'
-    __slots__ = ("_environment", "_data", "_policy")
+    _data: EnvironmentData | None
+    _policy: Policy
+    __slots__ = ("_data", "_environment", "_policy")
 
-    def __init__(self, environment: Environment, data: EnvironmentData, policy: 'Policy') -> None:
+    def __init__(self, environment: Environment, data: EnvironmentData, policy: Policy) -> None:
         self._environment = environment
         self._data = data
         self._policy = policy
 
     @property
-    def vs_environment(self):
+    def vs_environment(self) -> Environment:
         """
         Returns the vapoursynth.Environment-object representing this environment.
         """
@@ -270,7 +272,7 @@ class ManagedEnvironment:
             return vs.core.core
 
     @property
-    def outputs(self) -> t.Mapping[int, vs.VideoOutputTuple]:
+    def outputs(self) -> Mapping[int, vs.VideoOutputTuple | vs.AudioNode]:
         """
         Returns the output within this environment.
         """
@@ -278,7 +280,7 @@ class ManagedEnvironment:
             return vs.get_outputs()
 
     @contextlib.contextmanager
-    def inline_section(self) -> t.Generator[None, None, None]:
+    def inline_section(self) -> Iterator[None]:
         """
         Private API!
 
@@ -287,21 +289,21 @@ class ManagedEnvironment:
 
         If you follow the rules below, switching the environment
         will be invisible to the caller.
-        
+
         Rules for safely calling this function:
         - Do not suspend greenlets within the block!
         - Do not yield or await within the block!
         - Do not use __enter__ and __exit__ directly.
         - This function is not reentrant.
         """
-        self._policy.managed.inline_section_start(self._data)
+        self._policy.managed.inline_section_start(self._data)  # type: ignore
         try:
             yield
         finally:
             self._policy.managed.inline_section_end()
 
     @contextlib.contextmanager
-    def use(self) -> t.Generator[None, None, None]:
+    def use(self) -> Iterator[None]:
         """
         Switches to this environment within a block.
         """
@@ -312,20 +314,20 @@ class ManagedEnvironment:
         # Workaround: On 32bit systems, environment policies do not reset.
         self._policy.managed.set_environment(prev_environment)
 
-    def switch(self):
+    def switch(self) -> None:
         """
         Switches to the given environment without storing
         which environment has been defined previously.
         """
         self._environment.use().__enter__()
 
-    def dispose(self):
+    def dispose(self) -> None:
         if self.disposed:
             return
 
         logger.debug(f"Disposing environment {self._data!r}.")
-        admit_environment(self._data, self.core)
-        self._policy.api.destroy_environment(self._data)
+        admit_environment(self._data, self.core)  # type: ignore
+        self._policy.api.destroy_environment(self._data)  # type: ignore
         self._data = None
 
     @property
@@ -335,22 +337,23 @@ class ManagedEnvironment:
         """
         return self._data is None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, _, __, ___):
+    def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
         self.dispose()
 
-    def __del__(self):
+    def __del__(self) -> None:
         if self._data is None:
             return
 
         import warnings
+
         warnings.warn(f"Disposing {self!r} inside __del__. This might cause leaks.", ResourceWarning)
         self.dispose()
 
 
-class Policy:
+class Policy(contextlib.AbstractContextManager["Policy"]):
     """
     A managed policy is a very simple policy that just stores the environment
     data within the given store.
@@ -358,28 +361,29 @@ class Policy:
     For convenience (especially for testing), this is a context manager that
     makes sure policies are being unregistered when leaving a block.
     """
+
     _managed: _ManagedPolicy
 
     def __init__(self, store: EnvironmentStore) -> None:
         self._managed = _ManagedPolicy(store)
 
-    def register(self):
+    def register(self) -> None:
         """
         Registers the policy with VapourSynth.
         """
         register_policy(self._managed)
-    
-    def unregister(self):
+
+    def unregister(self) -> None:
         """
         Unregisters the policy from VapourSynth.
         """
         self._managed.api.unregister_policy()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self.register()
         return self
 
-    def __exit__(self, _, __, ___):
+    def __exit__(self, _: type[BaseException] | None, __: BaseException | None, ___: TracebackType | None) -> None:
         self.unregister()
 
     def new_environment(self) -> ManagedEnvironment:
@@ -398,7 +402,7 @@ class Policy:
         return ManagedEnvironment(env, data, self)
 
     @property
-    def api(self):
+    def api(self) -> EnvironmentPolicyAPI:
         """
         Returns the API instance for more complex interactions.
 
@@ -407,11 +411,10 @@ class Policy:
         return self._managed.api
 
     @property
-    def managed(self):
+    def managed(self) -> _ManagedPolicy:
         """
         Returns the actual policy within VapourSynth.
 
         You will rarely need to use this directly.
         """
         return self._managed
-

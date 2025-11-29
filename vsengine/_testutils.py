@@ -8,7 +8,7 @@ e.g. in case of test-failures.
 
 This should ensure that failing tests can safely clean up the current policy.
 
-It works by implementing a proxy policy 
+It works by implementing a proxy policy
 and monkey-patching vapoursynth.register_policy.
 
 This policy is transparent to subsequent policies registering themselves.
@@ -24,33 +24,22 @@ For policy-unrelated tests, use the function use_standalone_policy.
 This function will build a policy which only ever uses one environment.
 """
 
-import typing as t
+from typing import Any
+
+import vapoursynth as vs
+from vapoursynth import Core, EnvironmentData, EnvironmentPolicy, EnvironmentPolicyAPI, core
 
 from vsengine._hospice import admit_environment
 
-from vapoursynth import EnvironmentPolicyAPI, EnvironmentPolicy
-from vapoursynth import EnvironmentData
-from vapoursynth import Core, core
-
-import vapoursynth as vs
+__all__ = ["BLACKBOARD", "forcefully_unregister_policy", "use_standalone_policy", "wrap_test_for_asyncio"]
 
 
-__all__ = [
-    "forcefully_unregister_policy",
-    "use_standalone_policy",
-
-    "BLACKBOARD",
-
-    "wrap_test_for_asyncio"
-]
-
-
-BLACKBOARD = {}
+BLACKBOARD = dict[Any, Any]()
 
 
 class ProxyPolicy(EnvironmentPolicy):
-    _api: t.Optional[EnvironmentPolicyAPI]
-    _policy: t.Optional[EnvironmentPolicy]
+    _api: EnvironmentPolicyAPI | None
+    _policy: EnvironmentPolicy | None
 
     __slots__ = ("_api", "_policy")
 
@@ -58,9 +47,10 @@ class ProxyPolicy(EnvironmentPolicy):
         self._api = None
         self._policy = None
 
-    def attach_policy_to_proxy(self, policy: EnvironmentPolicy):
+    def attach_policy_to_proxy(self, policy: EnvironmentPolicy) -> None:
         if self._api is None:
             raise RuntimeError("This proxy is not active")
+
         if self._policy is not None:
             orig_register_policy(policy)
             raise SystemError("Unreachable code")
@@ -72,7 +62,7 @@ class ProxyPolicy(EnvironmentPolicy):
             self._policy = None
             raise
 
-    def forcefully_unregister_policy(self):
+    def forcefully_unregister_policy(self) -> None:
         if self._policy is None:
             return
         if self._api is None:
@@ -83,7 +73,6 @@ class ProxyPolicy(EnvironmentPolicy):
 
         self._api.unregister_policy()
         orig_register_policy(self)
-
 
     def on_policy_registered(self, special_api: EnvironmentPolicyAPI) -> None:
         self._api = special_api
@@ -98,12 +87,12 @@ class ProxyPolicy(EnvironmentPolicy):
             self._api = None
             vs.register_policy = orig_register_policy
 
-    def get_current_environment(self) -> t.Optional[EnvironmentData]:
+    def get_current_environment(self) -> EnvironmentData | None:
         if self._policy is None:
             raise RuntimeError("This proxy is not attached to a policy.")
         return self._policy.get_current_environment()
 
-    def set_environment(self, environment: t.Optional[EnvironmentData]) -> None:
+    def set_environment(self, environment: EnvironmentData | None) -> EnvironmentData | None:
         if self._policy is None:
             raise RuntimeError("This proxy is not attached to a policy.")
         return self._policy.set_environment(environment)
@@ -115,10 +104,10 @@ class ProxyPolicy(EnvironmentPolicy):
 
 
 class StandalonePolicy:
-    _current: t.Optional[EnvironmentData]
-    _api: t.Optional[EnvironmentPolicyAPI]
-    _core: t.Optional[Core]
-    __slots__ = ("_current", "_api", "_core")
+    _current: EnvironmentData | None
+    _api: EnvironmentPolicyAPI | None
+    _core: Core | None
+    __slots__ = ("_api", "_core", "_current")
 
     def __init__(self) -> None:
         self._current = None
@@ -129,7 +118,7 @@ class StandalonePolicy:
         self._current = special_api.create_environment()
         self._core = core.core
 
-    def on_policy_cleared(self):
+    def on_policy_cleared(self) -> None:
         assert self._api is not None
 
         admit_environment(self._current, self._core)
@@ -137,14 +126,15 @@ class StandalonePolicy:
         self._current = None
         self._core = None
 
-    def get_current_environment(self):
+    def get_current_environment(self) -> EnvironmentData | None:
         return self._current
 
-    def set_environment(self, environment: t.Optional[EnvironmentData]):
+    def set_environment(self, environment: EnvironmentData | None) -> EnvironmentData | None:
         if environment is not None and environment is not self._current:
             raise RuntimeError("No other environments should exist.")
+        return None
 
-    def is_alive(self, environment: EnvironmentData):
+    def is_alive(self, environment: EnvironmentData) -> bool:
         return self._current is environment
 
 
@@ -157,14 +147,14 @@ class EnvironmentPolicyAPIWrapper:
 
     __slots__ = ("_api", "_proxy")
 
-    def __init__(self, api, proxy) -> None:
+    def __init__(self, api: EnvironmentPolicyAPI, proxy: ProxyPolicy) -> None:
         self._api = api
         self._proxy = proxy
 
-    def __getattr__(self, __name: str) -> t.Any:
-        return getattr(self._api, __name)
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._api, name)
 
-    def unregister_policy(self):
+    def unregister_policy(self) -> None:
         self._proxy.forcefully_unregister_policy()
 
 
@@ -174,17 +164,21 @@ orig_register_policy(_policy)
 forcefully_unregister_policy = _policy.forcefully_unregister_policy
 
 
-def use_standalone_policy():
-    _policy.attach_policy_to_proxy(StandalonePolicy())
+def use_standalone_policy() -> None:
+    _policy.attach_policy_to_proxy(StandalonePolicy())  # type: ignore
 
 
-def wrap_test_for_asyncio(func):
+def wrap_test_for_asyncio(func):  # type: ignore
     import asyncio
-    from vsengine.loops import set_loop
+
     from vsengine.adapters.asyncio import AsyncIOLoop
-    def test_case(self):
-        async def _run():
+    from vsengine.loops import set_loop
+
+    def test_case(self) -> None:  # type: ignore
+        async def _run() -> None:
             set_loop(AsyncIOLoop())
             await func(self)
+
         asyncio.run(_run())
+
     return test_case

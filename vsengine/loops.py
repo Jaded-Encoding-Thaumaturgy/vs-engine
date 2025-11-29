@@ -2,34 +2,27 @@
 # Copyright (C) 2022  cid-chan
 # This project is licensed under the EUPL-1.2
 # SPDX-License-Identifier: EUPL-1.2
-from concurrent.futures import Future, CancelledError
-import contextlib
-import functools
-import typing as t
+from collections.abc import Awaitable, Callable, Iterator
+from concurrent.futures import CancelledError, Future
+from contextlib import contextmanager
+from functools import wraps
+from typing import Any
 
 import vapoursynth
 
-
-T = t.TypeVar("T")
-T_co = t.TypeVar("T_co", covariant=True)
+__all__ = ["Cancelled", "EventLoop", "from_thread", "get_loop", "keep_environment", "set_loop", "to_thread"]
 
 
-__all__ = [
-    "EventLoop", "Cancelled",
-    "get_loop", "set_loop",
-    "to_thread", "from_thread", "keep_environment"
-]
+class Cancelled(Exception):  # noqa: N818
+    pass
 
 
-class Cancelled(Exception): pass
-
-
-@contextlib.contextmanager
-def _noop():
+@contextmanager
+def _noop() -> Iterator[None]:
     yield
 
 
-DONE = Future()
+DONE = Future[None]()
 DONE.set_result(None)
 
 
@@ -53,23 +46,19 @@ class EventLoop:
         """
         ...
 
-    def from_thread(
-            self,
-            func: t.Callable[..., T],
-            *args: t.Any,
-            **kwargs: t.Any
-    ) -> Future[T]:
+    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
         """
         Ran from vapoursynth threads to move data to the event loop.
         """
-        ...
+        raise NotImplementedError
 
-    def to_thread(self, func: t.Callable[..., t.Any], *args: t.Any, **kwargs: t.Any) -> t.Any:
+    def to_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
         """
         Run this function in a worker thread.
         """
-        fut = Future()
-        def wrapper():
+        fut = Future[T]()
+
+        def wrapper() -> None:
             if not fut.set_running_or_notify_cancel():
                 return
 
@@ -81,6 +70,7 @@ class EventLoop:
                 fut.set_result(result)
 
         import threading
+
         threading.Thread(target=wrapper).start()
         return fut
 
@@ -95,11 +85,11 @@ class EventLoop:
 
         Only works in the main thread.
         """
-        future = Future()
+        future = Future[None]()
         self.from_thread(future.set_result, None)
         return future
 
-    def await_future(self, future: Future[T]) -> t.Awaitable[T]:
+    def await_future[T](self, future: Future[T]) -> Awaitable[T]:
         """
         Await a concurrent future.
 
@@ -108,8 +98,8 @@ class EventLoop:
         """
         raise NotImplementedError
 
-    @contextlib.contextmanager
-    def wrap_cancelled(self):
+    @contextmanager
+    def wrap_cancelled(self) -> Iterator[None]:
         """
         Wraps vsengine.loops.Cancelled into the native cancellation error.
         """
@@ -121,7 +111,7 @@ class EventLoop:
 
 class _NoEventLoop(EventLoop):
     """
-    This is the default event-loop used by 
+    This is the default event-loop used by
     """
 
     def attach(self) -> None:
@@ -133,13 +123,8 @@ class _NoEventLoop(EventLoop):
     def next_cycle(self) -> Future[None]:
         return DONE
 
-    def from_thread(
-            self,
-            func: t.Callable[..., T],
-            *args: t.Any,
-            **kwargs: t.Any
-    ) -> Future[T]:
-        fut = Future()
+    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+        fut = Future[T]()
         try:
             result = func(*args, **kwargs)
         except BaseException as e:
@@ -150,7 +135,7 @@ class _NoEventLoop(EventLoop):
 
 
 NO_LOOP = _NoEventLoop()
-current_loop = NO_LOOP
+current_loop: EventLoop = NO_LOOP
 
 
 def get_loop() -> EventLoop:
@@ -158,6 +143,7 @@ def get_loop() -> EventLoop:
     :return: The currently running loop.
     """
     return current_loop
+
 
 def set_loop(loop: EventLoop) -> None:
     """
@@ -178,7 +164,7 @@ def set_loop(loop: EventLoop) -> None:
         raise
 
 
-def keep_environment(func: t.Callable[..., T]) -> t.Callable[..., T]:
+def keep_environment[T](func: Callable[..., T]) -> Callable[..., T]:
     """
     This decorator will return a function that keeps the environment
     that was active when the decorator was applied.
@@ -191,15 +177,15 @@ def keep_environment(func: t.Callable[..., T]) -> t.Callable[..., T]:
     except RuntimeError:
         environment = _noop
 
-    @functools.wraps(func)
-    def _wrapper(*args, **kwargs):
+    @wraps(func)
+    def _wrapper(*args: Any, **kwargs: Any) -> T:
         with environment():
             return func(*args, **kwargs)
 
     return _wrapper
 
 
-def from_thread(func: t.Callable[..., T], *args: t.Any, **kwargs: t.Any) -> Future[T]:
+def from_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
     """
     Runs a function inside the current event-loop, preserving the currently running
     vapoursynth environment (if any).
@@ -213,13 +199,13 @@ def from_thread(func: t.Callable[..., T], *args: t.Any, **kwargs: t.Any) -> Futu
     """
 
     @keep_environment
-    def _wrapper():
+    def _wrapper() -> Any:
         return func(*args, **kwargs)
 
     return get_loop().from_thread(_wrapper)
 
 
-def to_thread(func: t.Callable[..., t.Any], *args: t.Any, **kwargs: t.Any) -> t.Any:
+def to_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
     """
     Runs a function in a dedicated thread or worker, preserving the currently running
     vapoursynth environment (if any).
@@ -229,19 +215,19 @@ def to_thread(func: t.Callable[..., t.Any], *args: t.Any, **kwargs: t.Any) -> t.
     :param kwargs: The keyword arguments to pass to the function.
     :return: An loop-specific object.
     """
+
     @keep_environment
-    def _wrapper():
+    def _wrapper() -> T:
         return func(*args, **kwargs)
-    
+
     return get_loop().to_thread(_wrapper)
 
 
-async def make_awaitable(future: Future[T]) -> T:
+async def make_awaitable[T](future: Future[T]) -> T:
     """
     Makes a future awaitable.
 
     :param future: The future to make awaitable.
     :return: An object that can be awaited.
     """
-    return t.cast(T, await get_loop().await_future(future))
-
+    return await get_loop().await_future(future)

@@ -3,10 +3,12 @@
 # This project is licensed under the EUPL-1.2
 # SPDX-License-Identifier: EUPL-1.2
 import gc
-import sys
 import logging
-import weakref
+import sys
 import threading
+import weakref
+from typing import Literal
+
 from vapoursynth import Core, EnvironmentData
 
 logger = logging.getLogger(__name__)
@@ -14,22 +16,22 @@ logger = logging.getLogger(__name__)
 
 lock = threading.Lock()
 refctr = 0
-refnanny = {}
-cores = {}
+refnanny = dict[int, weakref.ReferenceType[EnvironmentData]]()
+cores = dict[int, Core]()
 
-stage2_to_add = set()
-stage2 = set()
-stage1 = set()
+stage2_to_add = set[int]()
+stage2 = set[int]()
+stage1 = set[int]()
 
-hold = set()
+hold = set[int]()
 
 
-def admit_environment(environment: EnvironmentData, core: Core):
+def admit_environment(environment: EnvironmentData, core: Core) -> None:
     global refctr
 
     with lock:
         ident = refctr
-        refctr+=1
+        refctr += 1
 
     ref = weakref.ref(environment, lambda _: _add_tostage1(ident))
     cores[ident] = core
@@ -37,7 +39,8 @@ def admit_environment(environment: EnvironmentData, core: Core):
 
     logger.info(f"Admitted environment {environment!r} and {core!r} as with ID:{ident}.")
 
-def any_alive():
+
+def any_alive() -> bool:
     if bool(stage1) or bool(stage2) or bool(stage2_to_add):
         gc.collect()
     if bool(stage1) or bool(stage2) or bool(stage2_to_add):
@@ -47,8 +50,8 @@ def any_alive():
     return bool(stage1) or bool(stage2) or bool(stage2_to_add)
 
 
-def freeze():
-    logger.debug(f"Freezing the hospice. Cores won't be collected anyore.")
+def freeze() -> None:
+    logger.debug("Freezing the hospice. Cores won't be collected anyore.")
 
     hold.update(stage1)
     hold.update(stage2)
@@ -57,7 +60,8 @@ def freeze():
     stage2.clear()
     stage2_to_add.clear()
 
-def unfreeze():
+
+def unfreeze() -> None:
     stage1.update(hold)
     hold.clear()
 
@@ -72,7 +76,7 @@ def _add_tostage1(ident: int) -> None:
         stage1.add(ident)
 
 
-def _collectstage1(phase, __):
+def _collectstage1(phase: Literal["start", "stop"], _: dict[str, int]) -> None:
     if phase != "stop":
         return
 
@@ -86,7 +90,7 @@ def _collectstage1(phase, __):
             stage2_to_add.add(ident)
 
 
-def _collectstage2(phase, __):
+def _collectstage2(phase: Literal["start", "stop"], _: dict[str, int]) -> None:
     global stage2_to_add
 
     if phase != "stop":
@@ -111,4 +115,3 @@ def _collectstage2(phase, __):
 
 gc.callbacks.append(_collectstage2)
 gc.callbacks.append(_collectstage1)
-

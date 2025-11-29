@@ -3,45 +3,40 @@
 # This project is licensed under the EUPL-1.2
 # SPDX-License-Identifier: EUPL-1.2
 
-import typing as t
 import asyncio
 import contextlib
 import contextvars
+from collections.abc import Callable, Coroutine, Iterator
 from concurrent.futures import Future
+from typing import Any
 
-from vsengine.loops import EventLoop, Cancelled
-
-
-T = t.TypeVar("T")
+from vsengine.loops import Cancelled, EventLoop
 
 
 class AsyncIOLoop(EventLoop):
     """
     Bridges vs-engine to AsyncIO.
     """
+
     loop: asyncio.AbstractEventLoop
 
-    def __init__(self, loop: t.Optional[asyncio.AbstractEventLoop] = None) -> None:
+    def __init__(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         if loop is None:
             loop = asyncio.get_event_loop()
         self.loop = loop
 
-    def attach(self):
+    def attach(self) -> None:
         pass
 
-    def detach(self):
+    def detach(self) -> None:
         pass
 
-    def from_thread(
-            self,
-            func: t.Callable[..., T],
-            *args: t.Any,
-            **kwargs: t.Any
-    ) -> Future[T]:
-        future = Future()
+    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+        future = Future[T]()
 
         ctx = contextvars.copy_context()
-        def _wrap():
+
+        def _wrap() -> None:
             if not future.set_running_or_notify_cancel():
                 return
 
@@ -55,32 +50,34 @@ class AsyncIOLoop(EventLoop):
         self.loop.call_soon_threadsafe(_wrap)
         return future
 
-    def to_thread(self, func, *args, **kwargs):
+    def to_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Coroutine[Any, Any, T]:  # type: ignore
         ctx = contextvars.copy_context()
-        def _wrap():
+
+        def _wrap() -> T:
             return ctx.run(func, *args, **kwargs)
 
         return asyncio.to_thread(_wrap)
 
-    async def await_future(self, future: Future[T]) -> T:
+    async def await_future[T](self, future: Future[T]) -> T:
         with self.wrap_cancelled():
             return await asyncio.wrap_future(future, loop=self.loop)
 
     def next_cycle(self) -> Future[None]:
-        future = Future()
+        future = Future[None]()
         task = asyncio.current_task()
-        def continuation():
+
+        def continuation() -> None:
             if task is None or not task.cancelled():
                 future.set_result(None)
             else:
                 future.set_exception(Cancelled())
+
         self.loop.call_soon(continuation)
         return future
 
     @contextlib.contextmanager
-    def wrap_cancelled(self):
+    def wrap_cancelled(self) -> Iterator[None]:
         try:
             yield
         except Cancelled:
             raise asyncio.CancelledError() from None
-

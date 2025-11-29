@@ -5,20 +5,20 @@
 """
 vsengine.render renders video frames for you.
 """
-import typing as t
+
+from collections.abc import Iterator, Sequence
 from concurrent.futures import Future
 
 import vapoursynth
 
-from vsengine._futures import unified, UnifiedFuture
-from vsengine._nodes import close_when_needed, buffer_futures
-from vsengine._helpers import use_inline, EnvironmentTypes
+from vsengine._futures import UnifiedFuture, unified
+from vsengine._helpers import EnvironmentTypes, use_inline
+from vsengine._nodes import buffer_futures, close_when_needed
+
 
 @unified()
 def frame(
-        node: vapoursynth.VideoNode,
-        frameno: int,
-        env: t.Optional[EnvironmentTypes]=None
+    node: vapoursynth.VideoNode, frameno: int, env: EnvironmentTypes | None = None
 ) -> Future[vapoursynth.VideoFrame]:
     with use_inline("frame", env):
         return node.get_frame_async(frameno)
@@ -26,39 +26,36 @@ def frame(
 
 @unified()
 def planes(
-        node: vapoursynth.VideoNode,
-        frameno: int,
-        env: t.Optional[EnvironmentTypes]=None,
-        *,
-        planes: t.Optional[t.Sequence[int]]=None
-) -> Future[t.Tuple[bytes, ...]]:
-    def _extract(frame: vapoursynth.VideoFrame):
+    node: vapoursynth.VideoNode,
+    frameno: int,
+    env: EnvironmentTypes | None = None,
+    *,
+    planes: Sequence[int] | None = None,
+) -> Future[tuple[bytes, ...]]:
+    def _extract(frame: vapoursynth.VideoFrame) -> tuple[bytes, ...]:
         try:
             # This might be a variable format clip.
             # extract the plane as late as possible.
-            if planes is None:
-                ps = range(len(frame))
-            else:
-                ps = planes
-            return [bytes(frame[p]) for p in ps]
+            ps = range(len(frame)) if planes is None else planes
+            return tuple(bytes(frame[p]) for p in ps)
         finally:
             frame.close()
+
     return frame(node, frameno, env).map(_extract)
 
 
 @unified(type="generator")
 def frames(
-        node: vapoursynth.VideoNode,
-        env: t.Optional[EnvironmentTypes]=None,
-        *,
-        prefetch: int=0,
-        backlog: t.Optional[int]=None,
-
-        # Unlike the implementation provided by VapourSynth,
-        # we don't have to care about backwards compatibility and
-        # can just do the right thing from the beginning.
-        close: bool=True
-) -> t.Iterable[Future[vapoursynth.VideoFrame]]:
+    node: vapoursynth.VideoNode,
+    env: EnvironmentTypes | None = None,
+    *,
+    prefetch: int = 0,
+    backlog: int | None = None,
+    # Unlike the implementation provided by VapourSynth,
+    # we don't have to care about backwards compatibility and
+    # can just do the right thing from the beginning.
+    close: bool = True,
+) -> Iterator[Future[vapoursynth.VideoFrame]]:
     with use_inline("frames", env):
         length = len(node)
 
@@ -72,58 +69,58 @@ def frames(
         it = close_when_needed(it)
     return it
 
+
 @unified(type="generator")
 def render(
-        node: vapoursynth.VideoNode,
-        env: t.Optional[int]=None,
-        *,
-        prefetch: int=0,
-        backlog: t.Optional[int]=0,
-
-        y4m: bool = False
-) -> t.Iterable[Future[t.Tuple[int, bytes]]]:
-
+    node: vapoursynth.VideoNode,
+    env: int | None = None,
+    *,
+    prefetch: int = 0,
+    backlog: int | None = 0,
+    y4m: bool = False,
+) -> Iterator[Future[tuple[int, bytes]]]:
     frame_count = len(node)
-    
+
     if y4m:
         y4mformat = ""
         if node.format.color_family == vapoursynth.GRAY:
-            y4mformat = 'mono'
+            y4mformat = "mono"
             if node.format.bits_per_sample > 8:
                 y4mformat = y4mformat + str(node.format.bits_per_sample)
         elif node.format.color_family == vapoursynth.YUV:
             if node.format.subsampling_w == 1 and node.format.subsampling_h == 1:
-                y4mformat = '420'
+                y4mformat = "420"
             elif node.format.subsampling_w == 1 and node.format.subsampling_h == 0:
-                y4mformat = '422'
+                y4mformat = "422"
             elif node.format.subsampling_w == 0 and node.format.subsampling_h == 0:
-                y4mformat = '444'
+                y4mformat = "444"
             elif node.format.subsampling_w == 2 and node.format.subsampling_h == 2:
-                y4mformat = '410'
+                y4mformat = "410"
             elif node.format.subsampling_w == 2 and node.format.subsampling_h == 0:
-                y4mformat = '411'
+                y4mformat = "411"
             elif node.format.subsampling_w == 0 and node.format.subsampling_h == 1:
-                y4mformat = '440'
+                y4mformat = "440"
             if node.format.bits_per_sample > 8:
-                y4mformat = y4mformat + 'p' + str(node.format.bits_per_sample)
+                y4mformat = y4mformat + "p" + str(node.format.bits_per_sample)
         else:
             raise ValueError("Can only use GRAY and YUV for V4M-Streams")
 
         if len(y4mformat) > 0:
-            y4mformat = 'C' + y4mformat + ' '
+            y4mformat = "C" + y4mformat + " "
 
-        data = 'YUV4MPEG2 {y4mformat}W{width} H{height} F{fps_num}:{fps_den} Ip A0:0 XLENGTH={length}\n'.format(
+        data = "YUV4MPEG2 {y4mformat}W{width} H{height} F{fps_num}:{fps_den} Ip A0:0 XLENGTH={length}\n".format(
             y4mformat=y4mformat,
             width=node.width,
             height=node.height,
             fps_num=node.fps_num,
             fps_den=node.fps_den,
-            length=frame_count
+            length=frame_count,
         )
         yield UnifiedFuture.resolve((0, data.encode("ascii")))
 
     current_frame = 0
-    def render_single_frame(frame: vapoursynth.VideoFrame) -> t.Tuple[int, bytes]:
+
+    def render_single_frame(frame: vapoursynth.VideoFrame) -> tuple[int, bytes]:
         buf = []
         if y4m:
             buf.append(b"FRAME\n")
@@ -136,4 +133,3 @@ def render(
     for frame, fut in enumerate(frames(node, env, prefetch=prefetch, backlog=backlog).futures, 1):
         current_frame = frame
         yield UnifiedFuture.from_future(fut).map(render_single_frame)
-        

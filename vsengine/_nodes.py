@@ -2,21 +2,21 @@
 # Copyright (C) 2022  cid-chan
 # This project is licensed under the EUPL-1.2
 # SPDX-License-Identifier: EUPL-1.2
-import typing as t
+from collections.abc import Iterable
 from concurrent.futures import Future
+from contextlib import AbstractContextManager
 from threading import RLock
+
 from vapoursynth import core
 
 
-T = t.TypeVar("T")
-T_co = t.TypeVar("T_co", covariant=True)
-
-
-def buffer_futures(futures: t.Iterable[Future[T_co]], prefetch: int=0, backlog: t.Optional[int]=None) -> t.Iterable[Future[T_co]]:
+def buffer_futures[T_co](
+    futures: Iterable[Future[T_co]], prefetch: int = 0, backlog: int | None = None
+) -> Iterable[Future[T_co]]:
     if prefetch == 0:
         prefetch = core.num_threads
     if backlog is None:
-        backlog = prefetch*3
+        backlog = prefetch * 3
     if backlog < prefetch:
         backlog = prefetch
 
@@ -25,9 +25,9 @@ def buffer_futures(futures: t.Iterable[Future[T_co]], prefetch: int=0, backlog: 
     finished = False
     running = 0
     lock = RLock()
-    reorder: t.MutableMapping[int, Future[T_co]] = {}
+    reorder = dict[int, Future[T_co]]()
 
-    def _request_next():
+    def _request_next() -> None:
         nonlocal finished, running
         with lock:
             if finished:
@@ -44,7 +44,7 @@ def buffer_futures(futures: t.Iterable[Future[T_co]], prefetch: int=0, backlog: 
             reorder[idx] = fut
             fut.add_done_callback(_finished)
 
-    def _finished(f):
+    def _finished(f: Future[T_co]) -> None:
         nonlocal finished, running
         with lock:
             running -= 1
@@ -54,24 +54,25 @@ def buffer_futures(futures: t.Iterable[Future[T_co]], prefetch: int=0, backlog: 
             if f.exception() is not None:
                 finished = True
                 return
-            
+
             _refill()
 
-    def _refill():
+    def _refill() -> None:
         if finished:
             return
 
         with lock:
             # Two rules: 1. Don't exceed the concurrency barrier.
             #            2. Don't exceed unused-frames-backlog
-            while (not finished) and (running < prefetch) and len(reorder)<backlog:
+            while (not finished) and (running < prefetch) and len(reorder) < backlog:
                 _request_next()
+
     _refill()
 
     sidx = 0
     fut: Future[T_co]
     try:
-        while (not finished) or (len(reorder)>0) or running>0:
+        while (not finished) or (len(reorder) > 0) or running > 0:
             if sidx not in reorder:
                 # Spin. Reorder being empty should never happen.
                 continue
@@ -88,10 +89,11 @@ def buffer_futures(futures: t.Iterable[Future[T_co]], prefetch: int=0, backlog: 
         finished = True
 
 
-def close_when_needed(future_iterable: t.Iterable[Future[t.ContextManager[T]]]) -> t.Iterable[Future[T]]:
-    def copy_future_and_run_cb_before(fut):
-        f = Future()
-        def _as_completed(_):
+def close_when_needed[T](future_iterable: Iterable[Future[AbstractContextManager[T]]]) -> Iterable[Future[T]]:
+    def copy_future_and_run_cb_before(fut: Future[AbstractContextManager[T]]) -> Future[T]:
+        f = Future[T]()
+
+        def _as_completed(_: Future[AbstractContextManager[T]]) -> None:
             try:
                 r = fut.result()
             except Exception as e:
@@ -103,10 +105,11 @@ def close_when_needed(future_iterable: t.Iterable[Future[t.ContextManager[T]]]) 
         fut.add_done_callback(_as_completed)
         return f
 
-    def close_fut(f: Future[t.ContextManager[T]]):
-        def _do_close(_):
+    def close_fut(f: Future[AbstractContextManager[T]]) -> None:
+        def _do_close(_: Future[AbstractContextManager[T]]) -> None:
             if f.exception() is None:
                 f.result().__exit__(None, None, None)
+
         f.add_done_callback(_do_close)
 
     for fut in future_iterable:
