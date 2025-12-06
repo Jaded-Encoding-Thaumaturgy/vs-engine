@@ -14,8 +14,12 @@ trio = ["trio"]
 test = ["pytest"]
 
 [dependency-groups]
-dev = ["mypy>=1.19.0", "ruff>=0.14.7", "trio"]
-
+dev = [
+    "mypy>=1.19.0",
+    "ruff>=0.14.7",
+    "trio",
+    "vsstubs ; python_version>='3.13'",
+]
 [build-system]
 requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
