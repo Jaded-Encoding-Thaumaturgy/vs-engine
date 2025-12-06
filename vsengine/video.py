@@ -16,7 +16,7 @@ from vsengine._helpers import EnvironmentTypes, use_inline
 from vsengine._nodes import buffer_futures, close_when_needed
 
 
-@unified()
+@unified(kind="future")
 def frame(
     node: vapoursynth.VideoNode, frameno: int, env: EnvironmentTypes | None = None
 ) -> Future[vapoursynth.VideoFrame]:
@@ -24,7 +24,7 @@ def frame(
         return node.get_frame_async(frameno)
 
 
-@unified()
+@unified(kind="future")
 def planes(
     node: vapoursynth.VideoNode,
     frameno: int,
@@ -44,7 +44,7 @@ def planes(
     return frame(node, frameno, env).map(_extract)
 
 
-@unified(type="generator")
+@unified(kind="generator")
 def frames(
     node: vapoursynth.VideoNode,
     env: EnvironmentTypes | None = None,
@@ -70,7 +70,7 @@ def frames(
     return it
 
 
-@unified(type="generator")
+@unified(kind="generator")
 def render(
     node: vapoursynth.VideoNode,
     env: int | None = None,

@@ -10,28 +10,25 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from functools import wraps
 from inspect import isgeneratorfunction
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Literal, Self, overload
 
 from vsengine.loops import Cancelled, get_loop, keep_environment
-
-type UnifiedRunner[T, **P] = Callable[P, Future[T] | Iterator[Future[T]]]
-type UnifiedCallable[T] = Callable[..., UnifiedFuture[T] | UnifiedIterator[T]]
 
 
 class UnifiedFuture[T](
     Future[T], AbstractContextManager[Any, Any], AbstractAsyncContextManager[Any, Any], Awaitable[T]
 ):
     @classmethod
-    def from_call[**P](cls, func: UnifiedRunner[T, P], *args: P.args, **kwargs: P.kwargs) -> UnifiedFuture[T]:
+    def from_call[**P](cls, func: Callable[P, Future[T]], *args: P.args, **kwargs: P.kwargs) -> Self:
         try:
             future = func(*args, **kwargs)
         except Exception as e:
             return cls.reject(e)
 
-        return cls.from_future(future)  # type: ignore
+        return cls.from_future(future)
 
     @classmethod
-    def from_future(cls, future: Future[T]) -> UnifiedFuture[T]:
+    def from_future(cls, future: Future[T]) -> Self:
         if isinstance(future, cls):
             return future
 
@@ -47,13 +44,13 @@ class UnifiedFuture[T](
         return result
 
     @classmethod
-    def resolve(cls, value: T) -> UnifiedFuture[T]:
+    def resolve(cls, value: T) -> Self:
         future = cls()
         future.set_result(value)
         return future
 
     @classmethod
-    def reject(cls, error: BaseException) -> UnifiedFuture[Any]:
+    def reject(cls, error: BaseException) -> Self:
         future = cls()
         future.set_exception(error)
         return future
@@ -75,7 +72,7 @@ class UnifiedFuture[T](
     ) -> UnifiedFuture[V]:
         result = UnifiedFuture[V]()
 
-        def _run_cb[T0](cb: Callable[[T0], V], v: T0) -> None:
+        def _run_cb(cb: Callable[[Any], V], v: Any) -> None:
             try:
                 r = cb(v)
             except BaseException as e:
@@ -93,7 +90,7 @@ class UnifiedFuture[T](
                 if success_cb is not None:
                     _run_cb(success_cb, self.result())
                 else:
-                    result.set_result(self.result())  # type: ignore
+                    result.set_result(self.result())  # type: ignore[arg-type]
 
         self.add_done_callback(_done)
         return result
@@ -105,13 +102,13 @@ class UnifiedFuture[T](
         return self.then(None, cb)
 
     # Nicer Syntax
-    def __enter__(self) -> None:
+    def __enter__(self) -> Any:
         obj = self.result()
 
         if isinstance(obj, AbstractContextManager):
             return obj.__enter__()
 
-        raise NotImplementedError("(async) with is not implemented for this objec")
+        raise NotImplementedError("(async) with is not implemented for this object")
 
     def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
         obj = self.result()
@@ -119,7 +116,7 @@ class UnifiedFuture[T](
         if isinstance(obj, AbstractContextManager):
             return obj.__exit__(exc, val, tb)
 
-        raise NotImplementedError("(async) with is not implemented for this objec")
+        raise NotImplementedError("(async) with is not implemented for this object")
 
     async def awaitable(self) -> T:
         return await get_loop().await_future(self)
@@ -127,7 +124,7 @@ class UnifiedFuture[T](
     def __await__(self) -> Generator[Any, None, T]:
         return self.awaitable().__await__()
 
-    async def __aenter__(self) -> T:
+    async def __aenter__(self) -> Any:
         result = await self.awaitable()
 
         if isinstance(result, AbstractAsyncContextManager):
@@ -135,7 +132,7 @@ class UnifiedFuture[T](
         if isinstance(result, AbstractContextManager):
             return result.__enter__()
 
-        raise NotImplementedError("(async) with is not implemented for this objec")
+        raise NotImplementedError("(async) with is not implemented for this object")
 
     async def __aexit__(
         self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None
@@ -147,7 +144,7 @@ class UnifiedFuture[T](
         if isinstance(result, AbstractContextManager):
             return result.__exit__(exc, val, tb)
 
-        raise NotImplementedError("(async) with is not implemented for this objec")
+        raise NotImplementedError("(async) with is not implemented for this object")
 
 
 class UnifiedIterator[T](Iterator[T], AsyncIterator[T]):
@@ -155,8 +152,8 @@ class UnifiedIterator[T](Iterator[T], AsyncIterator[T]):
         self.future_iterable = future_iterable
 
     @classmethod
-    def from_call[**P](cls, func: UnifiedRunner[T, P], *args: P.args, **kwargs: P.kwargs) -> UnifiedIterator[T]:
-        return cls(func(*args, **kwargs))  # type: ignore
+    def from_call[**P](cls, func: Callable[P, Iterator[Future[T]]], *args: P.args, **kwargs: P.kwargs) -> Self:
+        return cls(func(*args, **kwargs))
 
     @property
     def futures(self) -> Iterator[Future[T]]:
@@ -273,89 +270,100 @@ class UnifiedIterator[T](Iterator[T], AsyncIterator[T]):
         return await get_loop().await_future(fut)
 
 
-# TODO: Probably needs overloads
-
-# type UnifiedRunner[T, **P] = Callable[P, Future[T] | Iterator[Future[T]]]
-# type UnifiedCallable[T] = Callable[..., UnifiedFuture[T] | UnifiedIterator[T]]
-
-
-# @overload
-# def unified[T, **P](
-#     type : s t r = ...,
-#     future_class: type[UnifiedFuture[T]] = UnifiedFuture[Any],
-#     iterable_class: type[UnifiedIterator[T]] = UnifiedIterator[Any],
-# ) -> (
-#     Callable[
-#         [Runner[P, Future[T]]],
-#         Callable[..., UnifiedFuture[T]],
-#     ]
-#     | Callable[
-#         [Runner[P, Iterator[Future[T]]]],
-#         Callable[..., UnifiedIterator[T]],
-#     ]
-# ): ...
-
-
-# @overload
-# def unified[T, **P](
-#     typee: L  iteral["future"] = "future", future_class: type[UnifiedFuture[T]] = UnifiedFuture[Any]
-# ) -> Callable[
-#     [Runner[P, Future[T]]],
-#     Callable[..., UnifiedFuture[T]],
-# ]: ...
-
-
-# @overload
-# def unified[T, **P](
-#     typee: Literal["generator"] = "generator",
-#     *,
-#     iterable_class: type[UnifiedIterator[T]] = UnifiedIterator[Any],
-# ) -> Callable[
-#     [Runner[P, Iterator[Future[T]]]],
-#     Callable[..., UnifiedIterator[T]],
-# ]: ...
-
-
+@overload
 def unified[T, **P](
-    type: str = "auto",
-    future_class: type[UnifiedFuture[T]] = UnifiedFuture[Any],
-    iterable_class: type[UnifiedIterator[T]] = UnifiedIterator[Any],
-) -> (
-    Callable[
-        [Callable[P, Future[T]]],
-        Callable[..., UnifiedFuture[T]],
-    ]
-    | Callable[
-        [Callable[P, Iterator[Future[T]]]],
-        Callable[..., UnifiedIterator[T]],
-    ]
-):
-    def _wrap_generator(func: UnifiedRunner[T, P]) -> UnifiedCallable[T]:
+    *,
+    kind: Literal["generator"],
+) -> Callable[
+    [Callable[P, Iterator[Future[T]]]],
+    Callable[P, UnifiedIterator[T]],
+]: ...
+
+
+@overload
+def unified[T, **P](
+    *,
+    kind: Literal["future"],
+) -> Callable[
+    [Callable[P, Future[T]]],
+    Callable[P, UnifiedFuture[T]],
+]: ...
+
+
+@overload
+def unified[T, **P](
+    *,
+    kind: Literal["generator"],
+    iterable_class: type[UnifiedIterator[T]],
+) -> Callable[
+    [Callable[P, Iterator[Future[T]]]],
+    Callable[P, UnifiedIterator[T]],
+]: ...
+
+
+@overload
+def unified[T, **P](
+    *,
+    kind: Literal["future"],
+    future_class: type[UnifiedFuture[T]],
+) -> Callable[
+    [Callable[P, Future[T]]],
+    Callable[P, UnifiedFuture[T]],
+]: ...
+
+
+@overload
+def unified[T, **P](
+    *,
+    kind: Literal["auto"] = "auto",
+    iterable_class: type[UnifiedIterator[Any]] = ...,
+    future_class: type[UnifiedFuture[Any]] = ...,
+) -> Callable[
+    [Callable[P, Future[T] | Iterator[Future[T]]]],
+    Callable[P, UnifiedFuture[T] | UnifiedIterator[T]],
+]: ...
+
+
+# Implementation
+def unified[T, **P](
+    *,
+    kind: str = "auto",
+    iterable_class: type[UnifiedIterator[Any]] = UnifiedIterator[Any],
+    future_class: type[UnifiedFuture[Any]] = UnifiedFuture[Any],
+) -> Any:
+    """
+    Decorator to normalize functions returning Future[T] or Iterator[Future[T]]
+    into functions returning UnifiedFuture[T] or UnifiedIterator[T].
+    """
+
+    def _decorator_generator(func: Callable[P, Iterator[Future[T]]]) -> Callable[P, UnifiedIterator[T]]:
         @wraps(func)
-        def _wrapped(*args: Any, **kwargs: Any) -> UnifiedIterator[T]:
+        def _wrapped(*args: P.args, **kwargs: P.kwargs) -> UnifiedIterator[T]:
             return iterable_class.from_call(func, *args, **kwargs)
 
         return _wrapped
 
-    def _wrap_future(func: UnifiedRunner[T, P]) -> UnifiedCallable[T]:
+    def _decorator_future(func: Callable[P, Future[T]]) -> Callable[P, UnifiedFuture[T]]:
         @wraps(func)
-        def _wrapped(*args: Any, **kwargs: Any) -> UnifiedFuture[T]:
+        def _wrapped(*args: P.args, **kwargs: P.kwargs) -> UnifiedFuture[T]:
             return future_class.from_call(func, *args, **kwargs)
 
         return _wrapped
 
-    def _wrapper(func: UnifiedRunner[T, P]) -> UnifiedCallable[T]:
-        if type == "auto":
+    def decorator(
+        func: Callable[P, Iterator[Future[T]]] | Callable[P, Future[T]],
+    ) -> Callable[P, UnifiedIterator[T]] | Callable[P, UnifiedFuture[T]]:
+        if kind == "auto":
             if isgeneratorfunction(func):
-                return _wrap_generator(func)
-            return _wrap_future(func)
+                return _decorator_generator(func)
+            return _decorator_future(func)  # type:ignore[arg-type]
 
-        if type == "generator":
-            return _wrap_generator(func)
+        if kind == "generator":
+            return _decorator_generator(func)  # type:ignore[arg-type]
 
-        if type == "future":
-            return _wrap_future(func)
+        if kind == "future":
+            return _decorator_future(func)  # type:ignore[arg-type]
 
         raise NotImplementedError
 
-    return _wrapper
+    return decorator

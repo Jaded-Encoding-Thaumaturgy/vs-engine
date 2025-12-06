@@ -18,6 +18,7 @@ def resolve(value):
     fut.set_result(value)
     return fut
 
+
 def reject(err):
     fut = Future()
     fut.set_exception(err)
@@ -28,19 +29,25 @@ def contextmanager():
     @contextlib.contextmanager
     def noop():
         yield 1
+
     return resolve(noop())
+
 
 def asynccontextmanager():
     @contextlib.asynccontextmanager
     async def noop():
         yield 2
+
     return resolve(noop())
+
 
 def succeeds():
     return resolve(1)
 
+
 def fails():
     return reject(RuntimeError())
+
 
 def fails_early():
     raise RuntimeError()
@@ -50,7 +57,7 @@ def future_iterator():
     n = 0
     while True:
         yield resolve(n)
-        n+=1
+        n += 1
 
 
 class WrappedUnifiedFuture(UnifiedFuture):
@@ -62,7 +69,6 @@ class WrappedUnifiedIterable(UnifiedIterator):
 
 
 class TestUnifiedFuture(unittest.TestCase):
-    
     @wrap_test_for_asyncio
     async def test_is_await(self):
         await UnifiedFuture.from_call(succeeds)
@@ -121,16 +127,19 @@ class TestUnifiedFuture(unittest.TestCase):
             fut.set_result(threading.current_thread())
 
         fut = Future()
-        thr = threading.Thread(target=lambda:_init_thread(fut))
+        thr = threading.Thread(target=lambda: _init_thread(fut))
+
         def _wrapper():
             return fut
 
         fut = UnifiedFuture.from_call(_wrapper)
 
         loop_thread = None
+
         def _record_loop_thr(_):
             nonlocal loop_thread
             loop_thread = threading.current_thread()
+
         fut.add_loop_callback(_record_loop_thr)
         thr.start()
         cb_thread = await fut
@@ -139,13 +148,14 @@ class TestUnifiedFuture(unittest.TestCase):
 
 
 class UnifiedIteratorTest(unittest.TestCase):
-
     def test_run_as_completed_succeeds(self):
         set_loop(NO_LOOP)
         my_futures = [Future(), Future()]
         results = []
+
         def _add_to_result(f):
             results.append(f.result())
+
         state = UnifiedIterator(iter(my_futures)).run_as_completed(_add_to_result)
         self.assertFalse(state.done())
         my_futures[1].set_result(2)
@@ -160,8 +170,9 @@ class UnifiedIteratorTest(unittest.TestCase):
         my_futures = [Future(), Future()]
         results = []
         errors = []
+
         def _add_to_result(f):
-            if (exc := f.exception()):
+            if exc := f.exception():
                 errors.append(exc)
             else:
                 results.append(f.result())
@@ -182,6 +193,7 @@ class UnifiedIteratorTest(unittest.TestCase):
         set_loop(NO_LOOP)
         my_futures = [Future(), Future()]
         results = []
+
         def _add_to_result(f):
             results.append(f.result())
             return False
@@ -198,6 +210,7 @@ class UnifiedIteratorTest(unittest.TestCase):
         set_loop(NO_LOOP)
         my_futures = [Future(), Future()]
         err = RuntimeError("test")
+
         def _crash(_):
             raise err
 
@@ -240,12 +253,15 @@ class UnifiedIteratorTest(unittest.TestCase):
 
     def test_run_as_completed_cancels_on_iterator_crash(self):
         err = RuntimeError("test")
+
         def _it():
             if False:
                 yield Future()
             raise err
+
         def _noop(_):
             pass
+
         state = UnifiedIterator(_it()).run_as_completed(_noop)
         self.assertTrue(state.done())
         self.assertIs(state.exception(), err)
@@ -254,7 +270,7 @@ class UnifiedIteratorTest(unittest.TestCase):
         n = 0
         for fut in UnifiedIterator.from_call(future_iterator).futures:
             self.assertEqual(n, fut.result())
-            n+=1
+            n += 1
             if n > 100:
                 break
 
@@ -262,7 +278,7 @@ class UnifiedIteratorTest(unittest.TestCase):
         n = 0
         for n2 in UnifiedIterator.from_call(future_iterator):
             self.assertEqual(n, n2)
-            n+=1
+            n += 1
             if n > 100:
                 break
 
@@ -271,13 +287,12 @@ class UnifiedIteratorTest(unittest.TestCase):
         n = 0
         async for n2 in UnifiedIterator.from_call(future_iterator):
             self.assertEqual(n, n2)
-            n+=1
+            n += 1
             if n > 100:
                 break
 
 
 class UnifiedFunctionTest(unittest.TestCase):
-
     def test_unified_auto_future_return_a_unified_future(self):
         @unified()
         def test_func():
@@ -299,7 +314,7 @@ class UnifiedFunctionTest(unittest.TestCase):
         self.assertEqual(next(f), 2)
 
     def test_unified_generator_accepts_other_iterables(self):
-        @unified(type="generator")
+        @unified(kind="generator")
         def test_func():
             return iter((resolve(1), resolve(2)))
 

@@ -139,7 +139,7 @@ class Script(AbstractContextManager["Script"], Awaitable["Script"]):
     ###
     # Public API
 
-    @unified()
+    @unified(kind="future")
     def get_variable(self, name: str, default: str | None = None) -> Future[str | None]:
         return UnifiedFuture.resolve(getattr(self.module, name, default))
 
