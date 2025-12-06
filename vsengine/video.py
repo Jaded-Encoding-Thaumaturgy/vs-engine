@@ -73,7 +73,7 @@ def frames(
 @unified(kind="generator")
 def render(
     node: vapoursynth.VideoNode,
-    env: int | None = None,
+    env: EnvironmentTypes | None = None,
     *,
     prefetch: int = 0,
     backlog: int | None = 0,
@@ -125,7 +125,7 @@ def render(
         if y4m:
             buf.append(b"FRAME\n")
 
-        for plane in frame:
+        for plane in iter(frame):
             buf.append(bytes(plane))
 
         return current_frame, b"".join(buf)
