@@ -46,7 +46,7 @@ from collections.abc import Awaitable, Callable, Generator, Mapping
 from concurrent.futures import Future
 from contextlib import AbstractContextManager
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Concatenate, Self
 
 from vapoursynth import Environment, get_current_environment
 
@@ -54,8 +54,8 @@ from vsengine._futures import UnifiedFuture, unified
 from vsengine.loops import make_awaitable, to_thread
 from vsengine.policy import ManagedEnvironment, Policy
 
-type Runner[T] = Callable[[Callable[[], T]], Future[T]]
-Executor = Callable[[AbstractContextManager[None], types.ModuleType], None]
+type Runner[R] = Callable[[Callable[[], R]], Future[R]]
+type Executor = Callable[[AbstractContextManager[None], types.ModuleType], None]
 
 
 __all__ = ["ExecutionFailed", "code", "script", "variables"]
@@ -96,11 +96,14 @@ def inline_runner[T](func: Callable[[], T]) -> Future[T]:
     return fut
 
 
-def chdir_runner[T](dir: os.PathLike[str], parent: Runner[T]) -> Runner[T]:
-    def runner(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Future[T]:
-        def _wrapped() -> T:
+def chdir_runner[**P, R](
+    dir: os.PathLike[str], parent: Runner[R]
+) -> Callable[Concatenate[Callable[P, R], P], Future[R]]:
+    def runner(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
+        def _wrapped() -> R:
             current = os.getcwd()
             os.chdir(dir)
+
             try:
                 f = func(*args, **kwargs)
                 return f

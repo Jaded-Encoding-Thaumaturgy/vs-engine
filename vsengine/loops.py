@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import CancelledError, Future
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any
 
 import vapoursynth
 
@@ -46,17 +45,17 @@ class EventLoop:
         """
         ...
 
-    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+    def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
         Ran from vapoursynth threads to move data to the event loop.
         """
         raise NotImplementedError
 
-    def to_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+    def to_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
         Run this function in a worker thread.
         """
-        fut = Future[T]()
+        fut = Future[R]()
 
         def wrapper() -> None:
             if not fut.set_running_or_notify_cancel():
@@ -123,8 +122,8 @@ class _NoEventLoop(EventLoop):
     def next_cycle(self) -> Future[None]:
         return DONE
 
-    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
-        fut = Future[T]()
+    def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
+        fut = Future[R]()
         try:
             result = func(*args, **kwargs)
         except BaseException as e:
@@ -164,7 +163,7 @@ def set_loop(loop: EventLoop) -> None:
         raise
 
 
-def keep_environment[T](func: Callable[..., T]) -> Callable[..., T]:
+def keep_environment[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """
     This decorator will return a function that keeps the environment
     that was active when the decorator was applied.
@@ -178,14 +177,14 @@ def keep_environment[T](func: Callable[..., T]) -> Callable[..., T]:
         environment = _noop
 
     @wraps(func)
-    def _wrapper(*args: Any, **kwargs: Any) -> T:
+    def _wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         with environment():
             return func(*args, **kwargs)
 
     return _wrapper
 
 
-def from_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+def from_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
     """
     Runs a function inside the current event-loop, preserving the currently running
     vapoursynth environment (if any).
@@ -199,13 +198,13 @@ def from_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[
     """
 
     @keep_environment
-    def _wrapper() -> Any:
+    def _wrapper() -> R:
         return func(*args, **kwargs)
 
     return get_loop().from_thread(_wrapper)
 
 
-def to_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+def to_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
     """
     Runs a function in a dedicated thread or worker, preserving the currently running
     vapoursynth environment (if any).
@@ -217,7 +216,7 @@ def to_thread[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]
     """
 
     @keep_environment
-    def _wrapper() -> T:
+    def _wrapper() -> R:
         return func(*args, **kwargs)
 
     return get_loop().to_thread(_wrapper)

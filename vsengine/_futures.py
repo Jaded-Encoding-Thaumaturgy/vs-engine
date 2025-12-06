@@ -60,7 +60,7 @@ class UnifiedFuture[T](
         # The done_callback should inherit the environment of the current call.
         super().add_done_callback(keep_environment(fn))
 
-    def add_loop_callback(self, func: Callable[[UnifiedFuture[T]], None]) -> None:
+    def add_loop_callback(self, func: Callable[[Future[T]], None]) -> None:
         def _wrapper(future: Future[T]) -> None:
             get_loop().from_thread(func, future)
 
