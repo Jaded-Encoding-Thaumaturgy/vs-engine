@@ -30,8 +30,6 @@ execution.
 A Script object has the function run() which returns a future which will
 reject with ExecutionFailed or with resolve with None.
 
-A convenience function called execute() which will block
-until the script has run.
 
 A Script-instance is awaitable, in which it will await the completion of the
 script.

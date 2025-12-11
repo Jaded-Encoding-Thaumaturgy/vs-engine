@@ -22,6 +22,14 @@ from vsengine.policy import ManagedEnvironment
 def frame(
     node: vs.VideoNode, frameno: int, env: vs.Environment | ManagedEnvironment | None = None
 ) -> Future[vs.VideoFrame]:
+    """
+    Request a specific frame from a node.
+
+    :param node: The node to request the frame from.
+    :param frameno: The frame number to request.
+    :param env: The environment to use for the request.
+    :return: A future that resolves to the frame.
+    """
     with use_inline("frame", env):
         return node.get_frame_async(frameno)
 
@@ -34,6 +42,16 @@ def planes(
     *,
     planes: Sequence[int] | None = None,
 ) -> Future[tuple[bytes, ...]]:
+    """
+    Request a specific frame from a node and return the planes as bytes.
+
+    :param node: The node to request the frame from.
+    :param frameno: The frame number to request.
+    :param env: The environment to use for the request.
+    :param planes: The planes to return. If None, all planes are returned.
+    :return: A future that resolves to a tuple of bytes.
+    """
+
     def _extract(frame: vs.VideoFrame) -> tuple[bytes, ...]:
         try:
             # This might be a variable format clip.
@@ -58,6 +76,16 @@ def frames(
     # can just do the right thing from the beginning.
     close: bool = True,
 ) -> Iterator[Future[vs.VideoFrame]]:
+    """
+    Iterate over the frames of a node.
+
+    :param node: The node to iterate over.
+    :param env: The environment to use for the request.
+    :param prefetch: The number of frames to prefetch.
+    :param backlog: The maximum number of frames to keep in the backlog.
+    :param close: Whether to close the frames automatically.
+    :return: An iterator of futures that resolve to the frames.
+    """
     with use_inline("frames", env):
         length = len(node)
 
@@ -82,6 +110,16 @@ def render(
     backlog: int | None = 0,
     y4m: bool = False,
 ) -> Iterator[Future[tuple[int, bytes]]]:
+    """
+    Render a node to a stream of bytes.
+
+    :param node: The node to render.
+    :param env: The environment to use for the request.
+    :param prefetch: The number of frames to prefetch.
+    :param backlog: The maximum number of frames to keep in the backlog.
+    :param y4m: Whether to output a Y4M header.
+    :return: An iterator of futures that resolve to a tuple of the frame number and the frame data.
+    """
     frame_count = len(node)
 
     if y4m:

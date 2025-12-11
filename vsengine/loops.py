@@ -3,6 +3,9 @@
 # Copyright (C) 2025  Jaded-Encoding-Thaumaturgy
 # This project is licensed under the EUPL-1.2
 # SPDX-License-Identifier: EUPL-1.2
+
+"""Integrate vsengine with your event-loop (be it GUI-based or IO-based)."""
+
 from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import CancelledError, Future
 from contextlib import contextmanager
@@ -14,7 +17,7 @@ __all__ = ["Cancelled", "EventLoop", "from_thread", "get_loop", "keep_environmen
 
 
 class Cancelled(Exception):  # noqa: N818
-    pass
+    """Exception raised when an operation has been cancelled."""
 
 
 @contextmanager
@@ -28,33 +31,54 @@ DONE.set_result(None)
 
 class EventLoop:
     """
+    Abstract base class for event loop integration.
+
     These functions must be implemented to bridge VapourSynth
-    with the event-loop of your choice.
+    with the event-loop of your choice (e.g., asyncio, Qt).
     """
 
     def attach(self) -> None:
         """
-        Called when set_loop is run.
+        Initialize the event loop hooks.
+
+        Called automatically when :func:`set_loop` is run.
         """
         ...
 
     def detach(self) -> None:
         """
-        Called when another event-loop should take over.
+        Clean up event loop hooks.
 
-        For example, when you restarting your application.
+        Called when another event-loop takes over, or when the application
+        is shutting down/restarting.
         """
         ...
 
     def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
-        Ran from vapoursynth threads to move data to the event loop.
+        Schedule a function to run on the event loop (usually the main thread).
+
+        This is typically called from VapourSynth threads to move data or
+        logic back to the main application loop.
+
+        :param func: The callable to execute.
+        :param args: Positional arguments for the callable.
+        :param kwargs: Keyword arguments for the callable.
+        :return: A Future representing the execution result.
         """
         raise NotImplementedError
 
     def to_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
-        Run this function in a worker thread.
+        Run a function in a separate worker thread.
+
+        This is used to offload blocking operations from the main event loop.
+        The default implementation utilizes :class:`threading.Thread`.
+
+        :param func: The callable to execute.
+        :param args: Positional arguments for the callable.
+        :param kwargs: Keyword arguments for the callable.
+        :return: A Future representing the execution result.
         """
         fut = Future[R]()
 
@@ -76,14 +100,16 @@ class EventLoop:
 
     def next_cycle(self) -> Future[None]:
         """
-        Passes control back to the event loop.
+        Pass control back to the event loop.
 
-        If there is no event-loop, the function will always return a resolved future.
-        If there is an event-loop, the function will never return a resolved future.
+        This allows the event loop to process pending events.
 
-        Throws vsengine.loops.Cancelled if the operation has been cancelled by that time.
+        * If there is **no** event-loop, the function returns an immediately resolved future.
+        * If there **is** an event-loop, the function returns a pending future that
+            resolves after the next cycle.
 
-        Only works in the main thread.
+        :raises vsengine.loops.Cancelled: If the operation has been cancelled.
+        :return: A Future that resolves when the cycle is complete.
         """
         future = Future[None]()
         self.from_thread(future.set_result, None)
@@ -91,17 +117,23 @@ class EventLoop:
 
     def await_future[T](self, future: Future[T]) -> Awaitable[T]:
         """
-        Await a concurrent future.
+        Convert a concurrent Future into an Awaitable compatible with this loop.
 
         This function does not need to be implemented if the event-loop
-        does not support async and await.
+        does not support ``async`` and ``await`` syntax.
+
+        :param future: The concurrent.futures.Future to await.
+        :return: An awaitable object.
         """
         raise NotImplementedError
 
     @contextmanager
     def wrap_cancelled(self) -> Iterator[None]:
         """
-        Wraps vsengine.loops.Cancelled into the native cancellation error.
+        Context manager to translate cancellation exceptions.
+
+        Wraps :exc:`vsengine.loops.Cancelled` into the native cancellation
+        error of the specific event loop implementation (e.g., ``asyncio.CancelledError``).
         """
         try:
             yield
@@ -111,7 +143,10 @@ class EventLoop:
 
 class _NoEventLoop(EventLoop):
     """
-    This is the default event-loop used by
+    The default event-loop implementation.
+
+    This is used when no specific loop is attached. It runs operations
+    synchronously/inline.
     """
 
     def attach(self) -> None:
@@ -140,22 +175,26 @@ current_loop: EventLoop = NO_LOOP
 
 def get_loop() -> EventLoop:
     """
-    :return: The currently running loop.
+    Retrieve the currently active event loop.
+
+    :return: The currently running EventLoop instance.
     """
     return current_loop
 
 
 def set_loop(loop: EventLoop) -> None:
     """
-    Sets the currently running loop.
+    Set the currently running event loop.
 
-    It will detach the previous loop first. If attaching fails,
-    it will revert to the NoLoop-implementation which runs everything inline
+    This function will detach the previous loop first. If attaching the new
+    loop fails, it reverts to the ``_NoEventLoop`` implementation which runs
+    everything inline.
 
-    :param loop: The event-loop instance that implements features.
+    :param loop: The EventLoop instance to attach.
     """
     global current_loop
     current_loop.detach()
+
     try:
         current_loop = loop
         loop.attach()
@@ -166,11 +205,14 @@ def set_loop(loop: EventLoop) -> None:
 
 def keep_environment[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """
-    This decorator will return a function that keeps the environment
-    that was active when the decorator was applied.
+    Decorate a function to preserve the VapourSynth environment.
 
-    :param func: A function to decorate.
-    :returns: A wrapped function that keeps the environment.
+    The returned function captures the VapourSynth environment active
+    at the moment the decorator is applied and restores it when the
+    function is executed.
+
+    :param func: The function to decorate.
+    :return: A wrapped function that maintains the captured environment.
     """
     try:
         environment = vapoursynth.get_current_environment().use
@@ -187,15 +229,17 @@ def keep_environment[**P, R](func: Callable[P, R]) -> Callable[P, R]:
 
 def from_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
     """
-    Runs a function inside the current event-loop, preserving the currently running
-    vapoursynth environment (if any).
+    Run a function inside the current event-loop.
 
-    .. note:: Be aware that the function might be called inline!
+    This preserves the currently running VapourSynth environment (if any).
 
-    :param func: A function to call inside the current event loop.
+    .. note::
+       Depending on the loop implementation, the function might be called inline.
+
+    :param func: The function to call inside the current event loop.
     :param args: The arguments for the function.
     :param kwargs: The keyword arguments to pass to the function.
-    :return: A future that resolves and reject depending on the outcome.
+    :return: A Future that resolves or rejects depending on the outcome.
     """
 
     @keep_environment
@@ -207,13 +251,14 @@ def from_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs)
 
 def to_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
     """
-    Runs a function in a dedicated thread or worker, preserving the currently running
-    vapoursynth environment (if any).
+    Run a function in a dedicated thread or worker.
 
-    :param func: A function to call inside the current event loop.
+    This preserves the currently running VapourSynth environment (if any).
+
+    :param func: The function to call in a worker thread.
     :param args: The arguments for the function.
     :param kwargs: The keyword arguments to pass to the function.
-    :return: An loop-specific object.
+    :return: A loop-specific Future object.
     """
 
     @keep_environment
@@ -225,9 +270,9 @@ def to_thread[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -
 
 async def make_awaitable[T](future: Future[T]) -> T:
     """
-    Makes a future awaitable.
+    Make a standard concurrent Future awaitable in the current loop.
 
-    :param future: The future to make awaitable.
-    :return: An object that can be awaited.
+    :param future: The future object to make awaitable.
+    :return: The result of the future, once awaited.
     """
     return await get_loop().await_future(future)

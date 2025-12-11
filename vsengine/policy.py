@@ -8,22 +8,20 @@ vsengine.policy implements a basic object-oriented implementation of
 EnvironmentPolicies.
 
 
-Here a quick run-down in how to use it, (but be sure to read on to select
+Here is a quick run-down in how to use it, (but be sure to read on to select
 the best store-implementation for you):
 
     >>> import vapoursynth as vs
-    >>> policy = Policy(GlobalStore())
-    >>> policy.register()
-    >>> with policy.new_environment() as env:
-    ...     with env.use():
-    ...         vs.core.std.BlankClip().set_output()
-    ...     print(env.outputs)
-    {"0": <vapoursynth.VideoNode ...>}
-    >>> policy.unregister()
+    >>> with Policy(GlobalStore()) as policy:
+    ...     with policy.new_environment() as env:
+    ...         with env.use():
+    ...             vs.core.std.BlankClip().set_output()
+    ...         print(env.outputs)
+    {0: <vapoursynth.VideoOutputTuple ...>}
 
 
 To use it, you first have to pick an EnvironmentStore implementation.
-A EnvironmentStore is just a simple object implementing the methods
+An EnvironmentStore is just a simple object implementing the methods
 set_current_environment and get_current_environment.
 These actually implement the state an EnvironmentPolicy is responsible
 for managing.
@@ -32,9 +30,9 @@ For convenience, three EnvironmentStores have already been implemented,
 tailored for different uses and concurrency needs:
 
 - The GlobalStore is useful when you are ever only using one Environment
-  at the same time
+  at the same time.
 
-- ThreadLocalStore is useful when you writing a multi-threaded applications,
+- ThreadLocalStore is useful when you are writing multi-threaded applications,
   that can run multiple environments at once. This one behaves like vsscript.
 
 - ContextVarStore is useful when you are using event-loops like asyncio,
@@ -242,6 +240,10 @@ class _ManagedPolicy(EnvironmentPolicy):
 
 
 class ManagedEnvironment(contextlib.AbstractContextManager["ManagedEnvironment"]):
+    """
+    Represents a VapourSynth environment that is managed by a policy.
+    """
+
     __slots__ = ("_data", "_environment", "_policy")
 
     def __init__(self, environment: Environment, data: EnvironmentData, policy: Policy) -> None:
@@ -335,7 +337,7 @@ class ManagedEnvironment(contextlib.AbstractContextManager["ManagedEnvironment"]
         """
         Checks if the environment is disposed
         """
-        return hasattr(self, "_data")
+        return not hasattr(self, "_data")
 
     def __del__(self) -> None:
         if self.disposed:
