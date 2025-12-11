@@ -36,29 +36,30 @@ A Script-instance is awaitable, in which it will await the completion of the
 script.
 """
 
+from __future__ import annotations
+
 import ast
 import os
 import runpy
 import textwrap
 import traceback
 import types
-from collections.abc import Awaitable, Callable, Generator, Mapping
+from collections.abc import Awaitable, Buffer, Callable, Generator
 from concurrent.futures import Future
 from contextlib import AbstractContextManager
-from types import TracebackType
-from typing import Any, Concatenate, Self
+from types import NoneType, TracebackType
+from typing import Any, Concatenate, overload
 
 from vapoursynth import Environment, get_current_environment
 
-from vsengine._futures import UnifiedFuture, unified
-from vsengine.loops import make_awaitable, to_thread
-from vsengine.policy import ManagedEnvironment, Policy
+from ._futures import UnifiedFuture, unified
+from .loops import make_awaitable, to_thread
+from .policy import ManagedEnvironment, Policy
+
+__all__ = ["ExecutionFailed", "load_code", "load_file"]
 
 type Runner[R] = Callable[[Callable[[], R]], Future[R]]
-type Executor = Callable[[AbstractContextManager[None], types.ModuleType], None]
-
-
-__all__ = ["ExecutionFailed", "code", "script", "variables"]
+type Executor = Callable[[WrapAllErrors, types.ModuleType], None]
 
 
 class ExecutionFailed(Exception):  # noqa: N818
@@ -97,7 +98,7 @@ def inline_runner[T](func: Callable[[], T]) -> Future[T]:
 
 
 def chdir_runner[**P, R](
-    dir: os.PathLike[str], parent: Runner[R]
+    dir: str | os.PathLike[str], parent: Runner[R]
 ) -> Callable[Concatenate[Callable[P, R], P], Future[R]]:
     def runner(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         def _wrapped() -> R:
@@ -118,35 +119,35 @@ def chdir_runner[**P, R](
     return runner
 
 
-class Script(AbstractContextManager["Script"], Awaitable["Script"]):
-    environment: Environment | ManagedEnvironment
+class AbstractScript[EnvironmentT: (Environment, ManagedEnvironment)](Awaitable[None]):
+    environment: EnvironmentT
 
     def __init__(
         self,
-        what: Executor,
+        executor: Executor,
         module: types.ModuleType,
-        environment: Environment | ManagedEnvironment,
-        runner: Runner[Self],
+        environment: EnvironmentT,
+        runner: Runner[None],
     ) -> None:
-        self.what = what
+        self.executor = executor
         self.environment = environment
         self.runner = runner
         self.module = module
-        self._future: Future[Self] | None = None
+        self._future: Future[None] | None = None
 
-    def _run_inline(self) -> Self:
-        with self.environment.use():
-            self.what(WrapAllErrors(), self.module)
-        return self
+    def __await__(self) -> Generator[Any, None, None]:
+        """
+        Runs the script and waits until the script has completed.
+        """
+        return self.run_async().__await__()
 
-    ###
-    # Public API
+    async def run_async(self) -> None:
+        """
+        Runs the script asynchronously, but it returns a coroutine.
+        """
+        return await make_awaitable(self.run())
 
-    @unified(kind="future")
-    def get_variable(self, name: str, default: str | None = None) -> Future[str | None]:
-        return UnifiedFuture.resolve(getattr(self.module, name, default))
-
-    def run(self) -> Future[Self]:
+    def run(self) -> Future[None]:
         """
         Runs the script.
 
@@ -157,51 +158,68 @@ class Script(AbstractContextManager["Script"], Awaitable["Script"]):
             self._future = self.runner(self._run_inline)
         return self._future
 
-    def result(self) -> Self:
+    def result(self) -> None:
         """
         Runs the script and blocks until the script has finished running.
         """
-        return self.run().result()
+        self.run().result()
+
+    @unified(kind="future")
+    def get_variable(self, name: str, default: str | None = None) -> Future[str | None]:
+        return UnifiedFuture[str | None].resolve(getattr(self.module, name, default))
+
+    def _run_inline(self) -> None:
+        with self.environment.use():
+            self.executor(WrapAllErrors(), self.module)
+
+
+class Script(AbstractScript[Environment]): ...
+
+
+class ManagedScript(AbstractScript[ManagedEnvironment], AbstractContextManager[None]):
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
+        self.dispose()
 
     def dispose(self) -> None:
         """
         Disposes the managed environment.
         """
-        if not isinstance(self.environment, ManagedEnvironment):
-            raise ValueError("You can only scripts backed by managed environments")
         self.environment.dispose()
 
-    def __enter__(self) -> Self:
-        return self
 
-    def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
-        if isinstance(self.environment, ManagedEnvironment):
-            self.dispose()
-
-    async def run_async(self) -> Self:
-        """
-        Runs the script asynchronously, but it returns a coroutine.
-        """
-        return await make_awaitable(self.run())
-
-    def __await__(self) -> Generator[Any, None, Self]:
-        """
-        Runs the script and waits until the script has completed.
-        """
-        return self.run_async().__await__()
-
-
-EnvironmentType = Environment | ManagedEnvironment | Policy | Script
-
-
-def script(
-    script: os.PathLike[str],
-    environment: EnvironmentType | None = None,
+@overload
+def load_file(
+    script: str | os.PathLike[str],
+    environment: Environment | Script | None = None,
     *,
     module_name: str = "__vapoursynth__",
     inline: bool = True,
-    chdir: os.PathLike[str] | None = None,
-) -> Script:
+    chdir: str | os.PathLike[str] | None = None,
+) -> Script: ...
+
+
+@overload
+def load_file(
+    script: str | os.PathLike[str],
+    environment: Policy | ManagedEnvironment | ManagedScript,
+    *,
+    module_name: str = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> ManagedScript: ...
+
+
+def load_file(
+    script: str | os.PathLike[str],
+    environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
+    *,
+    module_name: str = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> AbstractScript[Any]:
     """
     Runs the script at the given path.
 
@@ -218,55 +236,43 @@ def script(
               or await it.
     """
 
-    def _execute(ctx: AbstractContextManager[None], module: types.ModuleType) -> None:
+    def _execute(ctx: WrapAllErrors, module: types.ModuleType) -> None:
         with ctx:
             runpy.run_path(str(script), module.__dict__, module.__name__)
 
     return _load(_execute, environment, module_name=module_name, inline=inline, chdir=chdir)
 
 
-def variables(
-    variables: Mapping[str, str],
-    environment: EnvironmentType | None = None,
+@overload
+def load_code(
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
+    environment: Environment | Script | None = None,
     *,
     module_name: str = "__vapoursynth__",
     inline: bool = True,
-    chdir: os.PathLike[str] | None = None,
-) -> Script:
-    """
-    Sets variables to the module.
-
-    :param path: If path is a path, the interpreter will run the file behind that path.
-                 Otherwise it will execute it itself.
-    :param environment: Defines the environment in which the code should run. If passed
-                        a Policy, it will create a new environment from the policy, which
-                        can be acessed using the environment attribute. If the environment
-                        is another Script, it will take the environment and module of the
-                        script.
-    :param module_name: The name the module should get. Defaults to __vapoursynth__.
-    :param inline: Run the code inline, e.g. not in a separate thread.
-    :param chdir: Change the currently running directory while the script is running.
-                  This is unsafe when running multiple scripts at once.
-    :returns: A script object. It script starts running when you call start() on it,
-              or await it.
-    """
-
-    def _execute(ctx: AbstractContextManager[None], module: types.ModuleType) -> None:
-        with ctx:
-            for k, v in variables.items():
-                setattr(module, k, v)
-
-    return _load(_execute, environment, module_name=module_name, inline=inline, chdir=chdir)
+    chdir: str | os.PathLike[str] | None = None,
+) -> Script: ...
 
 
-def code(
-    script: str | bytes | ast.Module | types.CodeType,
-    environment: EnvironmentType | None = None,
+@overload
+def load_code(
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
+    environment: Policy | ManagedEnvironment | ManagedScript,
     *,
     module_name: str = "__vapoursynth__",
     inline: bool = True,
-    chdir: os.PathLike[str] | None = None,
-) -> Script:
+    chdir: str | os.PathLike[str] | None = None,
+) -> ManagedScript: ...
+
+
+def load_code(
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
+    environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
+    *,
+    module_name: str = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> AbstractScript[Any]:
     """
     Runs the given code snippet.
 
@@ -285,7 +291,7 @@ def code(
               or await it.
     """
 
-    def _execute(ctx: AbstractContextManager[None], module: types.ModuleType) -> None:
+    def _execute(ctx: WrapAllErrors, module: types.ModuleType) -> None:
         nonlocal script
 
         with ctx:
@@ -299,25 +305,30 @@ def code(
 
 
 def _load(
-    script: Executor,
-    environment: EnvironmentType | None = None,
+    executor: Executor,
+    environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
     *,
     module_name: str = "__vapoursynth__",
     inline: bool = True,
-    chdir: os.PathLike[str] | None = None,
-) -> Script:
+    chdir: str | os.PathLike[str] | None = None,
+) -> AbstractScript[Any]:
     runner = inline_runner if inline else to_thread
 
     module = environment.module if isinstance(environment, Script) else types.ModuleType(module_name)
 
-    if isinstance(environment, Script):
-        environment = environment.environment
-    elif isinstance(environment, Policy):
-        environment = environment.new_environment()
-    elif environment is None:
-        environment = get_current_environment()
-
     if chdir is not None:
         runner = chdir_runner(chdir, runner)
 
-    return Script(script, module, environment, runner)
+    if isinstance(environment, AbstractScript):
+        environment = environment.environment
+
+    if isinstance(environment, (Environment, NoneType)):
+        if environment is None:
+            environment = get_current_environment()
+
+        return Script(executor, module, environment, runner)
+
+    if isinstance(environment, Policy):
+        environment = environment.new_environment()
+
+    return ManagedScript(executor, module, environment, runner)
