@@ -10,30 +10,31 @@ vsengine.render renders video frames for you.
 from collections.abc import Iterator, Sequence
 from concurrent.futures import Future
 
-import vapoursynth
+import vapoursynth as vs
 
 from vsengine._futures import UnifiedFuture, unified
-from vsengine._helpers import EnvironmentTypes, use_inline
+from vsengine._helpers import use_inline
 from vsengine._nodes import buffer_futures, close_when_needed
+from vsengine.policy import ManagedEnvironment
 
 
 @unified(kind="future")
 def frame(
-    node: vapoursynth.VideoNode, frameno: int, env: EnvironmentTypes | None = None
-) -> Future[vapoursynth.VideoFrame]:
+    node: vs.VideoNode, frameno: int, env: vs.Environment | ManagedEnvironment | None = None
+) -> Future[vs.VideoFrame]:
     with use_inline("frame", env):
         return node.get_frame_async(frameno)
 
 
 @unified(kind="future")
 def planes(
-    node: vapoursynth.VideoNode,
+    node: vs.VideoNode,
     frameno: int,
-    env: EnvironmentTypes | None = None,
+    env: vs.Environment | ManagedEnvironment | None = None,
     *,
     planes: Sequence[int] | None = None,
 ) -> Future[tuple[bytes, ...]]:
-    def _extract(frame: vapoursynth.VideoFrame) -> tuple[bytes, ...]:
+    def _extract(frame: vs.VideoFrame) -> tuple[bytes, ...]:
         try:
             # This might be a variable format clip.
             # extract the plane as late as possible.
@@ -47,8 +48,8 @@ def planes(
 
 @unified(kind="generator")
 def frames(
-    node: vapoursynth.VideoNode,
-    env: EnvironmentTypes | None = None,
+    node: vs.VideoNode,
+    env: vs.Environment | ManagedEnvironment | None = None,
     *,
     prefetch: int = 0,
     backlog: int | None = None,
@@ -56,7 +57,7 @@ def frames(
     # we don't have to care about backwards compatibility and
     # can just do the right thing from the beginning.
     close: bool = True,
-) -> Iterator[Future[vapoursynth.VideoFrame]]:
+) -> Iterator[Future[vs.VideoFrame]]:
     with use_inline("frames", env):
         length = len(node)
 
@@ -74,8 +75,8 @@ def frames(
 
 @unified(kind="generator")
 def render(
-    node: vapoursynth.VideoNode,
-    env: EnvironmentTypes | None = None,
+    node: vs.VideoNode,
+    env: vs.Environment | ManagedEnvironment | None = None,
     *,
     prefetch: int = 0,
     backlog: int | None = 0,
@@ -84,31 +85,32 @@ def render(
     frame_count = len(node)
 
     if y4m:
-        y4mformat = ""
-        if node.format.color_family == vapoursynth.GRAY:
-            y4mformat = "mono"
-            if node.format.bits_per_sample > 8:
-                y4mformat = y4mformat + str(node.format.bits_per_sample)
-        elif node.format.color_family == vapoursynth.YUV:
-            if node.format.subsampling_w == 1 and node.format.subsampling_h == 1:
-                y4mformat = "420"
-            elif node.format.subsampling_w == 1 and node.format.subsampling_h == 0:
-                y4mformat = "422"
-            elif node.format.subsampling_w == 0 and node.format.subsampling_h == 0:
-                y4mformat = "444"
-            elif node.format.subsampling_w == 2 and node.format.subsampling_h == 2:
-                y4mformat = "410"
-            elif node.format.subsampling_w == 2 and node.format.subsampling_h == 0:
-                y4mformat = "411"
-            elif node.format.subsampling_w == 0 and node.format.subsampling_h == 1:
-                y4mformat = "440"
-            if node.format.bits_per_sample > 8:
-                y4mformat = y4mformat + "p" + str(node.format.bits_per_sample)
-        else:
-            raise ValueError("Can only use GRAY and YUV for V4M-Streams")
+        match node.format.color_family:
+            case vs.GRAY:
+                y4mformat = "mono"
+            case vs.YUV:
+                match (node.format.subsampling_w, node.format.subsampling_h):
+                    case (1, 1):
+                        y4mformat = "420"
+                    case (1, 0):
+                        y4mformat = "422"
+                    case (0, 0):
+                        y4mformat = "444"
+                    case (2, 2):
+                        y4mformat = "410"
+                    case (2, 0):
+                        y4mformat = "411"
+                    case (0, 1):
+                        y4mformat = "440"
+                    case _:
+                        raise NotImplementedError
+            case _:
+                raise ValueError("Can only use GRAY and YUV for V4M-Streams")
 
-        if len(y4mformat) > 0:
-            y4mformat = "C" + y4mformat + " "
+        if node.format.bits_per_sample > 8:
+            y4mformat += f"p{node.format.bits_per_sample}"
+
+        y4mformat = "C" + y4mformat + " "
 
         data = "YUV4MPEG2 {y4mformat}W{width} H{height} F{fps_num}:{fps_den} Ip A0:0 XLENGTH={length}\n".format(
             y4mformat=y4mformat,
@@ -122,8 +124,9 @@ def render(
 
     current_frame = 0
 
-    def render_single_frame(frame: vapoursynth.VideoFrame) -> tuple[int, bytes]:
-        buf = []
+    def render_single_frame(frame: vs.VideoFrame) -> tuple[int, bytes]:
+        buf = list[bytes]()
+
         if y4m:
             buf.append(b"FRAME\n")
 

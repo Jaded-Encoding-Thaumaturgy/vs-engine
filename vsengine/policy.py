@@ -249,6 +249,12 @@ class ManagedEnvironment(contextlib.AbstractContextManager["ManagedEnvironment"]
         self._data = data
         self._policy = policy
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
+        self.dispose()
+
     @property
     def vs_environment(self) -> Environment:
         """
@@ -330,12 +336,6 @@ class ManagedEnvironment(contextlib.AbstractContextManager["ManagedEnvironment"]
         Checks if the environment is disposed
         """
         return hasattr(self, "_data")
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
-        self.dispose()
 
     def __del__(self) -> None:
         if self.disposed:

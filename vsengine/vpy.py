@@ -6,13 +6,13 @@
 """
 vsengine.vpy runs vpy-scripts for you.
 
-    >>> script("/path/to/my/script").result()
-    >>> code("print('Hello, World!')").result()
+    >>> load_file("/path/to/my/script").result()
+    >>> load_code("print('Hello, World!')").result()
 
-script() and code() will create a Script-object which allows
+load_file() and load_code() will create a Script-object which allows
 you to run the script and access its environment.
 
-script() takes a path as the first argument while code() accepts
+load_file() takes a path as the first argument while load_code() accepts
 code (either compiled, parsed or as a string/bytes) and returns the Script-
 object.
 
