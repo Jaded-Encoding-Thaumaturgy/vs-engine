@@ -68,6 +68,7 @@ def frames(
 
     if close:
         it = close_when_needed(it)
+
     return it
 
 

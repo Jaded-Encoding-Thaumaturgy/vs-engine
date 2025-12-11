@@ -5,15 +5,14 @@
 # SPDX-License-Identifier: EUPL-1.2
 from collections.abc import Iterable, Iterator
 from concurrent.futures import Future
-from contextlib import AbstractContextManager
 from threading import RLock
 
-from vapoursynth import core
+from vapoursynth import RawFrame, core
 
 
-def buffer_futures[T_co](
-    futures: Iterable[Future[T_co]], prefetch: int = 0, backlog: int | None = None
-) -> Iterator[Future[T_co]]:
+def buffer_futures[FrameT: RawFrame](
+    futures: Iterable[Future[FrameT]], prefetch: int = 0, backlog: int | None = None
+) -> Iterator[Future[FrameT]]:
     if prefetch == 0:
         prefetch = core.num_threads
     if backlog is None:
@@ -26,7 +25,7 @@ def buffer_futures[T_co](
     finished = False
     running = 0
     lock = RLock()
-    reorder = dict[int, Future[T_co]]()
+    reorder = dict[int, Future[FrameT]]()
 
     def _request_next() -> None:
         nonlocal finished, running
@@ -45,7 +44,7 @@ def buffer_futures[T_co](
             reorder[idx] = fut
             fut.add_done_callback(_finished)
 
-    def _finished(f: Future[T_co]) -> None:
+    def _finished(f: Future[FrameT]) -> None:
         nonlocal finished, running
         with lock:
             running -= 1
@@ -89,11 +88,11 @@ def buffer_futures[T_co](
         finished = True
 
 
-def close_when_needed[T](future_iterable: Iterable[Future[AbstractContextManager[T]]]) -> Iterator[Future[T]]:
-    def copy_future_and_run_cb_before(fut: Future[AbstractContextManager[T]]) -> Future[T]:
-        f = Future[T]()
+def close_when_needed[FrameT: RawFrame](future_iterable: Iterable[Future[FrameT]]) -> Iterator[Future[FrameT]]:
+    def copy_future_and_run_cb_before(fut: Future[FrameT]) -> Future[FrameT]:
+        f = Future[FrameT]()
 
-        def _as_completed(_: Future[AbstractContextManager[T]]) -> None:
+        def _as_completed(_: Future[FrameT]) -> None:
             try:
                 r = fut.result()
             except Exception as e:
@@ -105,8 +104,8 @@ def close_when_needed[T](future_iterable: Iterable[Future[AbstractContextManager
         fut.add_done_callback(_as_completed)
         return f
 
-    def close_fut(f: Future[AbstractContextManager[T]]) -> None:
-        def _do_close(_: Future[AbstractContextManager[T]]) -> None:
+    def close_fut(f: Future[FrameT]) -> None:
+        def _do_close(_: Future[FrameT]) -> None:
             if f.exception() is None:
                 f.result().__exit__(None, None, None)
 
