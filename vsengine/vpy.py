@@ -43,11 +43,10 @@ import os
 import runpy
 import textwrap
 import traceback
-import types
 from collections.abc import Awaitable, Buffer, Callable, Generator
 from concurrent.futures import Future
 from contextlib import AbstractContextManager
-from types import NoneType, TracebackType
+from types import CodeType, ModuleType, NoneType, TracebackType
 from typing import Any, Concatenate, overload
 
 from vapoursynth import Environment, get_current_environment
@@ -59,7 +58,7 @@ from .policy import ManagedEnvironment, Policy
 __all__ = ["ExecutionFailed", "load_code", "load_file"]
 
 type Runner[R] = Callable[[Callable[[], R]], Future[R]]
-type Executor = Callable[[WrapAllErrors, types.ModuleType], None]
+type Executor = Callable[[WrapAllErrors, ModuleType], None]
 
 
 class ExecutionFailed(Exception):  # noqa: N818
@@ -125,7 +124,7 @@ class AbstractScript[EnvironmentT: (Environment, ManagedEnvironment)](Awaitable[
     def __init__(
         self,
         executor: Executor,
-        module: types.ModuleType,
+        module: ModuleType,
         environment: EnvironmentT,
         runner: Runner[None],
     ) -> None:
@@ -193,9 +192,9 @@ class ManagedScript(AbstractScript[ManagedEnvironment], AbstractContextManager[N
 @overload
 def load_file(
     script: str | os.PathLike[str],
-    environment: Environment | Script | None = None,
+    environment: Environment | None = None,
     *,
-    module_name: str = "__vapoursynth__",
+    module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> Script: ...
@@ -204,9 +203,29 @@ def load_file(
 @overload
 def load_file(
     script: str | os.PathLike[str],
-    environment: Policy | ManagedEnvironment | ManagedScript,
+    environment: Script,
     *,
-    module_name: str = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> Script: ...
+
+
+@overload
+def load_file(
+    script: str | os.PathLike[str],
+    environment: Policy | ManagedEnvironment,
+    *,
+    module: str | ModuleType = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> ManagedScript: ...
+
+
+@overload
+def load_file(
+    script: str | os.PathLike[str],
+    environment: ManagedScript,
+    *,
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> ManagedScript: ...
@@ -216,39 +235,38 @@ def load_file(
     script: str | os.PathLike[str],
     environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
     *,
-    module_name: str = "__vapoursynth__",
+    module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> AbstractScript[Any]:
     """
     Runs the script at the given path.
 
-    :param path: If path is a path, the interpreter will run the file behind that path.
-                 Otherwise it will execute it itself.
+    :param script: The path to the script file to run.
     :param environment: Defines the environment in which the code should run. If passed
                         a Policy, it will create a new environment from the policy, which
-                        can be acessed using the environment attribute.
-    :param module_name: The name the module should get. Defaults to __vapoursynth__.
+                        can be accessed using the environment attribute.
+    :param module: The name the module should get. Defaults to __vapoursynth__.
     :param inline: Run the code inline, e.g. not in a separate thread.
     :param chdir: Change the currently running directory while the script is running.
                   This is unsafe when running multiple scripts at once.
-    :returns: A script object. It script starts running when you call start() on it,
+    :returns: A script object. The script starts running when you call run() on it,
               or await it.
     """
 
-    def _execute(ctx: WrapAllErrors, module: types.ModuleType) -> None:
+    def _execute(ctx: WrapAllErrors, module: ModuleType) -> None:
         with ctx:
             runpy.run_path(str(script), module.__dict__, module.__name__)
 
-    return _load(_execute, environment, module_name=module_name, inline=inline, chdir=chdir)
+    return _load(_execute, environment, module, inline, chdir)
 
 
 @overload
 def load_code(
-    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
-    environment: Environment | Script | None = None,
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | CodeType,
+    environment: Environment | None = None,
     *,
-    module_name: str = "__vapoursynth__",
+    module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> Script: ...
@@ -256,71 +274,91 @@ def load_code(
 
 @overload
 def load_code(
-    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
-    environment: Policy | ManagedEnvironment | ManagedScript,
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | CodeType,
+    environment: Script,
     *,
-    module_name: str = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> Script: ...
+
+
+@overload
+def load_code(
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | CodeType,
+    environment: Policy | ManagedEnvironment,
+    *,
+    module: str | ModuleType = "__vapoursynth__",
+    inline: bool = True,
+    chdir: str | os.PathLike[str] | None = None,
+) -> ManagedScript: ...
+
+
+@overload
+def load_code(
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | CodeType,
+    environment: ManagedScript,
+    *,
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> ManagedScript: ...
 
 
 def load_code(
-    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | types.CodeType,
+    script: str | Buffer | ast.Module | ast.Expression | ast.Interactive | CodeType,
     environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
     *,
-    module_name: str = "__vapoursynth__",
+    module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> AbstractScript[Any]:
     """
     Runs the given code snippet.
 
-    :param path: If path is a path, the interpreter will run the file behind that path.
-                 Otherwise it will execute it itself.
+    :param script: The code to run. Can be a string, bytes, AST, or compiled code.
     :param environment: Defines the environment in which the code should run. If passed
                         a Policy, it will create a new environment from the policy, which
-                        can be acessed using the environment attribute. If the environment
+                        can be accessed using the environment attribute. If the environment
                         is another Script, it will take the environment and module of the
                         script.
-    :param module_name: The name the module should get. Defaults to __vapoursynth__.
+    :param module: The name the module should get. Defaults to __vapoursynth__.
     :param inline: Run the code inline, e.g. not in a separate thread.
     :param chdir: Change the currently running directory while the script is running.
                   This is unsafe when running multiple scripts at once.
-    :returns: A script object. It script starts running when you call start() on it,
+    :returns: A script object. The script starts running when you call run() on it,
               or await it.
     """
 
-    def _execute(ctx: WrapAllErrors, module: types.ModuleType) -> None:
+    def _execute(ctx: WrapAllErrors, module: ModuleType) -> None:
         nonlocal script
 
         with ctx:
-            if isinstance(script, types.CodeType):
+            if isinstance(script, CodeType):
                 code = script
             else:
                 code = compile(script, filename="<runvpy>", dont_inherit=True, flags=0, mode="exec")
             exec(code, module.__dict__, module.__dict__)
 
-    return _load(_execute, environment, module_name=module_name, inline=inline, chdir=chdir)
+    return _load(_execute, environment, module, inline, chdir)
 
 
 def _load(
     executor: Executor,
     environment: Policy | Environment | Script | ManagedEnvironment | ManagedScript | None = None,
-    *,
-    module_name: str = "__vapoursynth__",
+    module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
     chdir: str | os.PathLike[str] | None = None,
 ) -> AbstractScript[Any]:
     runner = inline_runner if inline else to_thread
 
-    module = environment.module if isinstance(environment, Script) else types.ModuleType(module_name)
-
     if chdir is not None:
         runner = chdir_runner(chdir, runner)
 
     if isinstance(environment, AbstractScript):
+        module = environment.module
         environment = environment.environment
+
+    if isinstance(module, str):
+        module = ModuleType(module)
 
     if isinstance(environment, (Environment, NoneType)):
         if environment is None:
