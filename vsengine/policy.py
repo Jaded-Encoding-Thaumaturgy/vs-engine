@@ -181,12 +181,12 @@ class _ManagedPolicy(EnvironmentPolicy):
         raise RuntimeError("Invalid state: No access to the current API")
 
     def on_policy_registered(self, special_api: EnvironmentPolicyAPI) -> None:
-        logger.debug("Successfully registered policy with VapourSynth.")
         self._api = special_api
+        logger.debug("Environment policy %r successfully registered with VapourSynth.", special_api)
 
     def on_policy_cleared(self) -> None:
         del self._api
-        logger.debug("Policy cleared.")
+        logger.debug("Environment policy successfully cleared.")
 
     def get_current_environment(self) -> EnvironmentData | None:
         # For small segments, allow switching the environment inline.
@@ -203,7 +203,7 @@ class _ManagedPolicy(EnvironmentPolicy):
                 return None
 
             if current_environment() is None:
-                logger.warning(f"Got dead environment: {current_environment()!r}")
+                logger.warning("Environment reference from store resolved to dead object: %r", current_environment)
                 self._store.set_current_environment(None)
                 return None
 
@@ -213,7 +213,10 @@ class _ManagedPolicy(EnvironmentPolicy):
                 assert received_environment
 
             if not self.is_alive(received_environment):
-                logger.warning(f"Got dead environment: {received_environment!r}")
+                logger.warning(
+                    "Received environment object is not alive (Garbage collected?): %r",
+                    received_environment,
+                )
                 # Remove the environment.
                 self._store.set_current_environment(None)
                 return None
@@ -225,10 +228,10 @@ class _ManagedPolicy(EnvironmentPolicy):
             previous_environment = self._store.get_current_environment()
 
             if environment is not None and not self.is_alive(environment):
-                logger.warning(f"Got dead environment: {environment!r}")
+                logger.warning("Attempted to set environment which is not alive: %r", environment)
                 self._store.set_current_environment(None)
             else:
-                logger.debug(f"Setting environment: {environment!r}")
+                logger.debug("Environment successfully set to: %r", environment)
                 if environment is None:
                     self._store.set_current_environment(None)
                 else:
@@ -328,7 +331,8 @@ class ManagedEnvironment(AbstractContextManager["ManagedEnvironment"]):
         if self.disposed:
             return
 
-        logger.debug(f"Disposing environment {self._data!r}.")
+        logger.debug("Starting disposal of environment: %r", self._data)
+
         admit_environment(self._data, self.core)
         self._policy.api.destroy_environment(self._data)
         del self._data
@@ -396,8 +400,11 @@ class Policy(AbstractContextManager["Policy"]):
         """
         data = self.api.create_environment(self.flags_creation)
         env = self.api.wrap_environment(data)
-        logger.debug("Created new environment")
-        return ManagedEnvironment(env, data, self)
+
+        try:
+            return ManagedEnvironment(env, data, self)
+        finally:
+            logger.debug("Successfully created new environment %r", data)
 
     @property
     def api(self) -> EnvironmentPolicyAPI:
