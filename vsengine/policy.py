@@ -62,11 +62,11 @@ from __future__ import annotations
 
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from logging import getLogger
-from types import TracebackType
+from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING, Self
 from weakref import ReferenceType, ref
 
@@ -274,7 +274,7 @@ class ManagedEnvironment(AbstractContextManager["ManagedEnvironment"]):
             return vs.core.core
 
     @property
-    def outputs(self) -> Mapping[int, vs.VideoOutputTuple | vs.AudioNode]:
+    def outputs(self) -> MappingProxyType[int, vs.VideoOutputTuple | vs.AudioNode]:
         """
         Returns the output within this environment.
         """
