@@ -61,22 +61,41 @@ type Executor[T] = Callable[[WrapAllErrors, ModuleType], T]
 
 
 class ExecutionFailed(Exception):  # noqa: N818
+    """
+    Exception raised when script execution fails.
+    """
+
     #: It contains the actual exception that has been raised.
     parent_error: BaseException
 
     def __init__(self, parent_error: BaseException) -> None:
+        """
+        Initialize the ExecutionFailed exception.
+
+        :param parent_error: The original exception that occurred.
+        """
         msg = textwrap.indent(self.extract_traceback(parent_error), "| ")
         super().__init__(f"An exception was raised while running the script.\n{msg}")
         self.parent_error = parent_error
 
     @staticmethod
     def extract_traceback(error: BaseException) -> str:
+        """
+        Extract and format the traceback from an exception.
+
+        :param error: The exception to extract the traceback from.
+        :return: A formatted string containing the traceback.
+        """
         msg = traceback.format_exception(type(error), error, error.__traceback__)
         msg = "".join(msg)
         return msg
 
 
 class WrapAllErrors(AbstractContextManager[None]):
+    """
+    Context manager that wraps exceptions in ExecutionFailed.
+    """
+
     def __enter__(self) -> None: ...
 
     def __exit__(self, exc: type[BaseException] | None, val: BaseException | None, tb: TracebackType | None) -> None:
@@ -85,6 +104,12 @@ class WrapAllErrors(AbstractContextManager[None]):
 
 
 def inline_runner[T](func: Callable[[], T]) -> Future[T]:
+    """
+    Runs a function inline and returns the result as a Future.
+
+    :param func: The function to run.
+    :return: A future containing the result or exception of the function.
+    """
     fut = Future[T]()
     try:
         result = func()
@@ -98,6 +123,14 @@ def inline_runner[T](func: Callable[[], T]) -> Future[T]:
 def chdir_runner[**P, R](
     dir: str | os.PathLike[str], parent: Runner[R]
 ) -> Callable[Concatenate[Callable[P, R], P], Future[R]]:
+    """
+    Wraps a runner to change the current working directory during execution.
+
+    :param dir: The directory to change to.
+    :param parent: The runner to wrap.
+    :return: A wrapped runner function.
+    """
+
     def runner(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         def _wrapped() -> R:
             current = os.getcwd()
@@ -118,6 +151,12 @@ def chdir_runner[**P, R](
 
 
 class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitable[dict[str, Any]]):
+    """
+    Base class for VapourSynth script wrappers.
+
+    Handles execution and variable retrieval for scripts.
+    """
+
     environment: EnvironmentT
 
     _future: Future[dict[str, Any]]
@@ -174,6 +213,13 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
     def get_variable[T](self, name: str, default: T) -> Future[Any | T]: ...
     @unified(kind="future")
     def get_variable(self, name: str, default: Any = None) -> Future[Any]:
+        """
+        Retrieve a variable from the script's module.
+
+        :param name: The name of the variable to retrieve.
+        :param default: The default value if the variable is not found.
+        :return: A future that resolves to the variable's value.
+        """
         return UnifiedFuture[Any].resolve(getattr(self.module, name, default))
 
     def _run_inline(self) -> dict[str, Any]:
@@ -181,10 +227,17 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
             return self.executor(WrapAllErrors(), self.module)
 
 
-class Script(AbstractScript[vs.Environment]): ...
+class Script(AbstractScript[vs.Environment]):
+    """
+    A VapourSynth script wrapper for unmanaged environments.
+    """
 
 
 class ManagedScript(AbstractScript[ManagedEnvironment], AbstractContextManager["ManagedScript"]):
+    """
+    A VapourSynth script wrapper for managed environments.
+    """
+
     def __enter__(self) -> Self:
         return self
 
