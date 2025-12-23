@@ -150,7 +150,7 @@ def chdir_runner[**P, R](
     return runner
 
 
-class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitable[dict[str, Any]]):
+class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitable[None]):
     """
     Base class for VapourSynth script wrappers.
 
@@ -159,33 +159,33 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
 
     environment: EnvironmentT
 
-    _future: Future[dict[str, Any]]
+    _future: Future[None]
 
     def __init__(
         self,
-        executor: Executor[dict[str, Any]],
+        executor: Executor[None],
         module: ModuleType,
         environment: EnvironmentT,
-        runner: Runner[dict[str, Any]],
+        runner: Runner[None],
     ) -> None:
         self.executor = executor
         self.environment = environment
         self.runner = runner
         self.module = module
 
-    def __await__(self) -> Generator[Any, None, dict[str, Any]]:
+    def __await__(self) -> Generator[Any, None, None]:
         """
         Runs the script and waits until the script has completed.
         """
         return self.run_async().__await__()
 
-    async def run_async(self) -> dict[str, Any]:
+    async def run_async(self) -> None:
         """
         Runs the script asynchronously, but it returns a coroutine.
         """
         return await make_awaitable(self.run())
 
-    def run(self) -> Future[dict[str, Any]]:
+    def run(self) -> Future[None]:
         """
         Runs the script.
 
@@ -199,7 +199,7 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
 
         return self._future
 
-    def result(self) -> dict[str, Any]:
+    def result(self) -> None:
         """
         Runs the script and blocks until the script has finished running.
         """
@@ -316,9 +316,9 @@ def load_script(
               or await it.
     """
 
-    def _execute(ctx: WrapAllErrors, module: ModuleType) -> dict[str, Any]:
+    def _execute(ctx: WrapAllErrors, module: ModuleType) -> None:
         with ctx:
-            return runpy.run_path(str(script), module.__dict__, module.__name__)
+            runpy.run_path(str(script), module.__dict__, module.__name__)
 
     return _load(_execute, environment, module, inline, chdir)
 
@@ -390,7 +390,7 @@ def load_code(
               or await it.
     """
 
-    def _execute(ctx: WrapAllErrors, module: ModuleType) -> dict[str, Any]:
+    def _execute(ctx: WrapAllErrors, module: ModuleType) -> None:
         nonlocal script
 
         with ctx:
@@ -401,13 +401,11 @@ def load_code(
 
             exec(code, module.__dict__, module.__dict__)
 
-            return module.__dict__
-
     return _load(_execute, environment, module, inline, chdir)
 
 
 def _load(
-    executor: Executor[dict[str, Any]],
+    executor: Executor[None],
     environment: Policy | vs.Environment | Script | ManagedEnvironment | ManagedScript | None = None,
     module: str | ModuleType = "__vapoursynth__",
     inline: bool = True,
