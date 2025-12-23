@@ -222,9 +222,9 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
         """
         return UnifiedFuture[Any].resolve(getattr(self.module, name, default))
 
-    def _run_inline(self) -> dict[str, Any]:
+    def _run_inline(self) -> None:
         with self.environment.use():
-            return self.executor(WrapAllErrors(), self.module)
+            self.executor(WrapAllErrors(), self.module)
 
 
 class Script(AbstractScript[vs.Environment]):
