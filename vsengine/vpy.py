@@ -199,11 +199,11 @@ class AbstractScript[EnvironmentT: (vs.Environment, ManagedEnvironment)](Awaitab
 
         return self._future
 
-    def result(self) -> None:
+    def result(self) -> dict[str, Any]:
         """
         Runs the script and blocks until the script has finished running.
         """
-        self.run().result()
+        return self.run().result()
 
     @overload
     @unified(kind="future")
