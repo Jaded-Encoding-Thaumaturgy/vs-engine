@@ -6,6 +6,8 @@
 
 """Integrate vsengine with your event-loop (be it GUI-based or IO-based)."""
 
+import threading
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import CancelledError, Future
 from contextlib import contextmanager
@@ -29,12 +31,11 @@ DONE = Future[None]()
 DONE.set_result(None)
 
 
-class EventLoop:
+class EventLoop(ABC):
     """
     Abstract base class for event loop integration.
 
-    These functions must be implemented to bridge VapourSynth
-    with the event-loop of your choice (e.g., asyncio, Qt).
+    These functions must be implemented to bridge VapourSynth with the event-loop of your choice (e.g., asyncio, Qt).
     """
 
     def attach(self) -> None:
@@ -43,7 +44,6 @@ class EventLoop:
 
         Called automatically when :func:`set_loop` is run.
         """
-        ...
 
     def detach(self) -> None:
         """
@@ -52,8 +52,8 @@ class EventLoop:
         Called when another event-loop takes over, or when the application
         is shutting down/restarting.
         """
-        ...
 
+    @abstractmethod
     def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
         Schedule a function to run on the event loop (usually the main thread).
@@ -66,7 +66,6 @@ class EventLoop:
         :param kwargs: Keyword arguments for the callable.
         :return: A Future representing the execution result.
         """
-        raise NotImplementedError
 
     def to_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         """
@@ -93,9 +92,8 @@ class EventLoop:
             else:
                 fut.set_result(result)
 
-        import threading
-
         threading.Thread(target=wrapper).start()
+
         return fut
 
     def next_cycle(self) -> Future[None]:
@@ -145,18 +143,8 @@ class _NoEventLoop(EventLoop):
     """
     The default event-loop implementation.
 
-    This is used when no specific loop is attached. It runs operations
-    synchronously/inline.
+    This is used when no specific loop is attached. It runs operations synchronously/inline.
     """
-
-    def attach(self) -> None:
-        pass
-
-    def detach(self) -> None:
-        pass
-
-    def next_cycle(self) -> Future[None]:
-        return DONE
 
     def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         fut = Future[R]()
@@ -167,6 +155,9 @@ class _NoEventLoop(EventLoop):
         else:
             fut.set_result(result)
         return fut
+
+    def next_cycle(self) -> Future[None]:
+        return DONE
 
 
 NO_LOOP = _NoEventLoop()
