@@ -7,9 +7,8 @@
 import asyncio
 import contextlib
 import contextvars
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
-from typing import Any
 
 from vsengine.loops import Cancelled, EventLoop
 
@@ -19,21 +18,13 @@ class AsyncIOLoop(EventLoop):
     Bridges vs-engine to AsyncIO.
     """
 
-    loop: asyncio.AbstractEventLoop
-
     def __init__(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         if loop is None:
             loop = asyncio.get_event_loop()
         self.loop = loop
 
-    def attach(self) -> None:
-        pass
-
-    def detach(self) -> None:
-        pass
-
-    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
-        future = Future[T]()
+    def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
+        future = Future[R]()
 
         ctx = contextvars.copy_context()
 
@@ -51,17 +42,23 @@ class AsyncIOLoop(EventLoop):
         self.loop.call_soon_threadsafe(_wrap)
         return future
 
-    def to_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Coroutine[Any, Any, T]:  # type: ignore
+    def to_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         ctx = contextvars.copy_context()
+        future = Future[R]()
 
-        def _wrap() -> T:
+        def _wrap() -> R:
             return ctx.run(func, *args, **kwargs)
 
-        return asyncio.to_thread(_wrap)
+        async def _run() -> None:
+            try:
+                result = await asyncio.to_thread(_wrap)
+            except BaseException as e:
+                future.set_exception(e)
+            else:
+                future.set_result(result)
 
-    async def await_future[T](self, future: Future[T]) -> T:
-        with self.wrap_cancelled():
-            return await asyncio.wrap_future(future, loop=self.loop)
+        self.loop.create_task(_run())
+        return future
 
     def next_cycle(self) -> Future[None]:
         future = Future[None]()
@@ -75,6 +72,10 @@ class AsyncIOLoop(EventLoop):
 
         self.loop.call_soon(continuation)
         return future
+
+    async def await_future[T](self, future: Future[T]) -> T:
+        with self.wrap_cancelled():
+            return await asyncio.wrap_future(future, loop=self.loop)
 
     @contextlib.contextmanager
     def wrap_cancelled(self) -> Iterator[None]:

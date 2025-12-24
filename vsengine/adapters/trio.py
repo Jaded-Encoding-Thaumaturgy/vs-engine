@@ -7,45 +7,35 @@
 import contextlib
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future
-from typing import Any
 
-from trio import Cancelled as TrioCancelled
-from trio import CancelScope, CapacityLimiter, Event, Nursery, to_thread
-from trio.lowlevel import TrioToken, current_trio_token
+import trio
 
 from vsengine.loops import Cancelled, EventLoop
 
 
 class TrioEventLoop(EventLoop):
-    _scope: Nursery
+    """
+    Bridges vs-engine to Trio.
+    """
 
-    def __init__(self, nursery: Nursery, limiter: CapacityLimiter | None = None) -> None:
+    def __init__(self, nursery: trio.Nursery, limiter: trio.CapacityLimiter | None = None) -> None:
         if limiter is None:
-            limiter = to_thread.current_default_thread_limiter()
+            limiter = trio.to_thread.current_default_thread_limiter()
 
         self.nursery = nursery
         self.limiter = limiter
-        self._token: TrioToken | None = None
+        self._token: trio.lowlevel.TrioToken | None = None
 
     def attach(self) -> None:
-        """
-        Called when set_loop is run.
-        """
-        self._token = current_trio_token()
+        self._token = trio.lowlevel.current_trio_token()
 
     def detach(self) -> None:
-        """
-        Called when another event-loop should take over.
-        """
         self.nursery.cancel_scope.cancel()
 
-    def from_thread[T](self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
-        """
-        Ran from vapoursynth threads to move data to the event loop.
-        """
+    def from_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
         assert self._token is not None
 
-        fut = Future[T]()
+        fut = Future[R]()
 
         def _executor() -> None:
             if not fut.set_running_or_notify_cancel():
@@ -61,33 +51,25 @@ class TrioEventLoop(EventLoop):
         self._token.run_sync_soon(_executor)
         return fut
 
-    async def to_thread(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:  # type: ignore
-        """
-        Run this function in a worker thread.
-        """
-        result = None
-        error: BaseException | None = None
+    def to_thread[**P, R](self, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Future[R]:
+        future = Future[R]()
 
-        def _executor() -> None:
-            nonlocal result, error
-            try:
-                result = func(*args, **kwargs)
-            except BaseException as e:
-                error = e
+        async def _run() -> None:
+            def _executor() -> None:
+                try:
+                    result = func(*args, **kwargs)
+                    future.set_result(result)
+                except BaseException as e:
+                    future.set_exception(e)
 
-        await to_thread.run_sync(_executor, limiter=self.limiter)
+            await trio.to_thread.run_sync(_executor, limiter=self.limiter)
 
-        if error is not None:
-            # unreachable?
-            assert isinstance(error, BaseException)
-            raise error
-        else:
-            return result
+        self.nursery.start_soon(_run)
+        return future
 
     def next_cycle(self) -> Future[None]:
-        scope = CancelScope()
+        scope = trio.CancelScope()
         future = Future[None]()
-        TrioEventLoop.to_thread
 
         def continuation() -> None:
             if scope.cancel_called:
@@ -99,43 +81,27 @@ class TrioEventLoop(EventLoop):
         return future
 
     async def await_future[T](self, future: Future[T]) -> T:
-        """
-        Await a concurrent future.
-
-        This function does not need to be implemented if the event-loop
-        does not support async and await.
-        """
-        event = Event()
-
-        result: T | None = None
-        error: BaseException | None = None
+        event = trio.Event()
 
         def _when_done(_: Future[T]) -> None:
-            nonlocal error, result
-            if (error := future.exception()) is not None:
-                pass
-            else:
-                result = future.result()
             self.from_thread(event.set)
 
         future.add_done_callback(_when_done)
+
         try:
             await event.wait()
-        except TrioCancelled:
+        except trio.Cancelled:
             raise
 
-        if error is not None:
+        try:
+            return future.result()
+        except BaseException as exc:
             with self.wrap_cancelled():
-                raise error
-        else:
-            return result  # type: ignore
+                raise exc
 
     @contextlib.contextmanager
     def wrap_cancelled(self) -> Iterator[None]:
-        """
-        Wraps vsengine.loops.Cancelled into the native cancellation error.
-        """
         try:
             yield
         except Cancelled:
-            raise TrioCancelled.__new__(TrioCancelled) from None
+            raise trio.Cancelled.__new__(trio.Cancelled) from None
