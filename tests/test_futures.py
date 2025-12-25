@@ -285,6 +285,8 @@ def test_unified_iterator_run_as_completed_cancels_on_iterator_crash() -> None:
     err = RuntimeError("test")
 
     def _it() -> Iterator[Future[int]]:
+        if False:
+            yield Future[int]()  # type:ignore[unreachable]
         raise err
 
     def _noop(_: Future[int]) -> None:
