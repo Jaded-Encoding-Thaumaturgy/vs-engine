@@ -68,6 +68,8 @@ def unfreeze() -> None:
 
 
 def _is_core_still_used(ident: int) -> bool:
+    # There has to be the Core, CoreTimings and the temporary reference as an argument to getrefcount
+    # https://docs.python.org/3/library/sys.html#sys.getrefcount
     return sys.getrefcount(cores[ident]) > 3
 
 
