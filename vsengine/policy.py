@@ -70,10 +70,20 @@ from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING, Self
 from weakref import ReferenceType, ref
 
-import vapoursynth as vs
-from vapoursynth import Environment, EnvironmentData, EnvironmentPolicy, EnvironmentPolicyAPI, register_policy
+from vapoursynth import (
+    AudioNode,
+    Core,
+    Environment,
+    EnvironmentData,
+    EnvironmentPolicy,
+    EnvironmentPolicyAPI,
+    VideoOutputTuple,
+    core,
+    get_outputs,
+    register_policy,
+)
 
-from vsengine._hospice import admit_environment
+from ._hospice import admit_environment
 
 __all__ = ["ContextVarStore", "GlobalStore", "ManagedEnvironment", "Policy", "ThreadLocalStore"]
 
@@ -262,27 +272,54 @@ class ManagedEnvironment(AbstractContextManager["ManagedEnvironment"]):
         self.dispose()
 
     @property
+    def core(self) -> Core:
+        """
+        Returns the core representing this environment.
+        """
+        with self.inline_section():
+            return core.core
+
+    @property
+    def disposed(self) -> bool:
+        """
+        Checks if the environment is disposed
+        """
+        return not hasattr(self, "_data")
+
+    @property
+    def outputs(self) -> MappingProxyType[int, VideoOutputTuple | AudioNode]:
+        """
+        Returns the outputs within this environment.
+        """
+        with self.inline_section():
+            return get_outputs()
+
+    @property
     def vs_environment(self) -> Environment:
         """
         Returns the vapoursynth.Environment-object representing this environment.
         """
         return self._environment
 
-    @property
-    def core(self) -> vs.Core:
+    def switch(self) -> None:
         """
-        Returns the core representing this environment.
+        Switches to the given environment without storing
+        which environment has been defined previously.
         """
-        with self.inline_section():
-            return vs.core.core
+        self._environment.use().__enter__()
 
-    @property
-    def outputs(self) -> MappingProxyType[int, vs.VideoOutputTuple | vs.AudioNode]:
+    def dispose(self) -> None:
         """
-        Returns the output within this environment.
+        Disposes of the environment.
         """
-        with self.inline_section():
-            return vs.get_outputs()
+        if self.disposed:
+            return
+
+        logger.debug("Starting disposal of environment: %r", self._data)
+
+        admit_environment(self._data, self.core)
+        self._policy.api.destroy_environment(self._data)
+        del self._data
 
     @contextmanager
     def inline_section(self) -> Iterator[None]:
@@ -320,30 +357,6 @@ class ManagedEnvironment(AbstractContextManager["ManagedEnvironment"]):
         # # Workaround: On 32bit systems, environment policies do not reset.
         # self._policy.managed.set_environment(prev_environment)
 
-    def switch(self) -> None:
-        """
-        Switches to the given environment without storing
-        which environment has been defined previously.
-        """
-        self._environment.use().__enter__()
-
-    def dispose(self) -> None:
-        if self.disposed:
-            return
-
-        logger.debug("Starting disposal of environment: %r", self._data)
-
-        admit_environment(self._data, self.core)
-        self._policy.api.destroy_environment(self._data)
-        del self._data
-
-    @property
-    def disposed(self) -> bool:
-        """
-        Checks if the environment is disposed
-        """
-        return not hasattr(self, "_data")
-
     def __del__(self) -> None:
         if self.disposed:
             return
@@ -366,20 +379,16 @@ class Policy(AbstractContextManager["Policy"]):
     _managed: _ManagedPolicy
 
     def __init__(self, store: EnvironmentStore, flags_creation: int = 0) -> None:
+        """
+        Initializes a new Policy
+
+        Args:
+            store: The store to use for managing environments.
+            flags_creation: The flags to use when creating environments.
+                            See vapoursynth.CoreCreationFlags for more information.
+        """
         self._managed = _ManagedPolicy(store)
         self.flags_creation = flags_creation
-
-    def register(self) -> None:
-        """
-        Registers the policy with VapourSynth.
-        """
-        register_policy(self._managed)
-
-    def unregister(self) -> None:
-        """
-        Unregisters the policy from VapourSynth.
-        """
-        self._managed.api.unregister_policy()
 
     def __enter__(self) -> Self:
         self.register()
@@ -387,24 +396,6 @@ class Policy(AbstractContextManager["Policy"]):
 
     def __exit__(self, _: type[BaseException] | None, __: BaseException | None, ___: TracebackType | None) -> None:
         self.unregister()
-
-    def new_environment(self) -> ManagedEnvironment:
-        """
-        Creates a new VapourSynth core.
-
-        You need to call `dispose()` on this environment when you are done
-        using the new environment.
-
-        For convenience, a managed environment will also serve as a
-        context-manager that disposes the environment automatically.
-        """
-        data = self.api.create_environment(self.flags_creation)
-        env = self.api.wrap_environment(data)
-
-        try:
-            return ManagedEnvironment(env, data, self)
-        finally:
-            logger.debug("Successfully created new environment %r", data)
 
     @property
     def api(self) -> EnvironmentPolicyAPI:
@@ -423,3 +414,32 @@ class Policy(AbstractContextManager["Policy"]):
         You will rarely need to use this directly.
         """
         return self._managed
+
+    def register(self) -> None:
+        """
+        Registers the policy with VapourSynth.
+        """
+        register_policy(self._managed)
+
+    def unregister(self) -> None:
+        """
+        Unregisters the policy from VapourSynth.
+        """
+        self._managed.api.unregister_policy()
+
+    def new_environment(self) -> ManagedEnvironment:
+        """
+        Creates a new VapourSynth core.
+
+        You need to call `dispose()` on this environment when you are done
+        using the new environment.
+
+        For convenience, a managed environment will also serve as a
+        context-manager that disposes the environment automatically.
+        """
+        data = self.api.create_environment(self.flags_creation)
+        env = self.api.wrap_environment(data)
+
+        menv = ManagedEnvironment(env, data, self)
+        logger.debug("Successfully created new environment %r", data)
+        return menv

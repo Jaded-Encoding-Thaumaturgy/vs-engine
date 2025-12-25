@@ -66,10 +66,14 @@ class UnifiedFuture[T](Future[T], AbstractContextManager[T, Any], AbstractAsyncC
         self.add_done_callback(_wrapper)
 
     # Manipulating futures
+    @overload
+    def then[V](self, success_cb: Callable[[T], V], err_cb: None) -> UnifiedFuture[V]: ...
+    @overload
+    def then[V](self, success_cb: None, err_cb: Callable[[BaseException], V]) -> UnifiedFuture[T | V]: ...
     def then[V](
         self, success_cb: Callable[[T], V] | None, err_cb: Callable[[BaseException], V] | None
-    ) -> UnifiedFuture[V]:
-        result = UnifiedFuture[V]()
+    ) -> UnifiedFuture[V] | UnifiedFuture[T | V]:
+        result = UnifiedFuture[T | V]()
 
         def _run_cb(cb: Callable[[Any], V], v: Any) -> None:
             try:
@@ -89,7 +93,7 @@ class UnifiedFuture[T](Future[T], AbstractContextManager[T, Any], AbstractAsyncC
                 if success_cb is not None:
                     _run_cb(success_cb, self.result())
                 else:
-                    result.set_result(self.result())  # type: ignore[arg-type]
+                    result.set_result(self.result())
 
         self.add_done_callback(_done)
         return result

@@ -12,10 +12,10 @@ from concurrent.futures import Future
 
 import vapoursynth as vs
 
-from vsengine._futures import UnifiedFuture, unified
-from vsengine._helpers import use_inline
-from vsengine._nodes import buffer_futures, close_when_needed
-from vsengine.policy import ManagedEnvironment
+from ._futures import UnifiedFuture, unified
+from ._helpers import use_inline
+from ._nodes import buffer_futures, close_when_needed
+from .policy import ManagedEnvironment
 
 __all__ = ["frame", "frames", "planes", "render"]
 

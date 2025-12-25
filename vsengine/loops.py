@@ -18,7 +18,7 @@ import vapoursynth as vs
 __all__ = ["Cancelled", "EventLoop", "from_thread", "get_loop", "keep_environment", "set_loop", "to_thread"]
 
 
-class Cancelled(Exception):  # noqa: N818
+class Cancelled(BaseException):
     """Exception raised when an operation has been cancelled."""
 
 
