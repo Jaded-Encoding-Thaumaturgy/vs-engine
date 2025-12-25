@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Tests for event loop adapters."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import threading
@@ -30,7 +32,7 @@ def make_async(func: Any) -> Any:
 def is_async(func: Any) -> Any:
     """Decorator to run an async test within a loop."""
 
-    def _wrapped(self: "AsyncAdapterTest", *args: Any, **kwargs: Any) -> Any:
+    def _wrapped(self: AsyncAdapterTest, *args: Any, **kwargs: Any) -> Any:
         return self.run_within_loop_async(func, args, kwargs)
 
     return _wrapped
@@ -87,7 +89,7 @@ class AdapterTest:
 
     @make_async
     def test_from_thread_with_success(self) -> Iterator[None]:
-        def test_func() -> "AdapterTest":
+        def test_func() -> AdapterTest:
             return self
 
         with self.with_loop() as loop:
