@@ -1,4 +1,4 @@
-# vs-engine
+# vs-jet-engine
 
 [![Lint](https://github.com/Jaded-Encoding-Thaumaturgy/vs-engine/actions/workflows/lint.yml/badge.svg)](https://github.com/Jaded-Encoding-Thaumaturgy/vs-engine/actions/workflows/lint.yml)
 [![Tests](https://github.com/Jaded-Encoding-Thaumaturgy/vs-engine/actions/workflows/test.yml/badge.svg)](https://github.com/Jaded-Encoding-Thaumaturgy/vs-engine/actions/workflows/test.yml)
@@ -9,7 +9,7 @@ An engine for vapoursynth previewers, renderers and script analyis tools.
 ## Installation
 
 ```
-pip install vsengine-jet
+pip install vsjetengine
 ```
 
 ## Using vsengine

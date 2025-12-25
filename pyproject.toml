@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27.0", "versioningit"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vsengine-jet"
+name = "vsjetengine"
 description = "An engine for vapoursynth previewers, renderers and script analyis tools."
 readme = "README.md"
 requires-python = ">=3.12"
