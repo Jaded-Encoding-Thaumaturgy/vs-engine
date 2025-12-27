@@ -7,7 +7,7 @@
 """This module provides an abstraction layer to integrate VapourSynth with any event loop (asyncio, Qt, Trio, etc.)."""
 
 import threading
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import CancelledError, Future
 from contextlib import contextmanager
@@ -31,7 +31,7 @@ DONE = Future[None]()
 DONE.set_result(None)
 
 
-class EventLoop(ABC):
+class EventLoop:
     """
     Abstract base class for event loop integration.
 
